@@ -1,0 +1,188 @@
+/*
+  macro_keyboard: firmware for the 6-key + 1-knob CH552G mini keyboard
+
+  - Interface 0: HID keyboard. Each key/knob action types the text of its
+    slot (macro syntax in docs/PROTOCOL.md).
+  - Interface 1: vendor HID for the config GUI (gui/), protocol v1.
+  - Config is stored in the 128-byte DataFlash.
+  - LED (one WS2812 on P3.4): dim blue idle, green while typing,
+    white flash after saving, red before jumping to the bootloader.
+  - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
+    plugging in, or send BOOT from the GUI.
+
+  Board options: CH552 Board, 24 MHz (internal) 5V,
+                 USB Settings: USER CODE w/ 266B USB ram,
+                 Bootloader pin: P1.5 pull-down
+  cli board options: usb_settings=user266,bootloader_pin=p15
+
+  USB code in src/usb is adapted from the CH55xduino qmkCompatibleKeyboard
+  example (LGPL-2.1).
+*/
+
+#ifndef USER_USB_RAM
+#error "This sketch needs to be compiled with a USER USB setting"
+#endif
+
+#include <WS2812.h>
+#include "src/config.h"
+#include "src/protocol.h"
+#include "src/storage.h"
+#include "src/macro.h"
+#include "src/usb/hid.h"
+
+#define NUM_KEYS 7
+// Slot order: A, B, C, D, E, F, knob press
+__code uint8_t keyPins[NUM_KEYS] = {PIN_KEY_A, PIN_KEY_B, PIN_KEY_C, PIN_KEY_D,
+                                    PIN_KEY_E, PIN_KEY_F, PIN_KNOB_SW};
+__code uint8_t keySlots[NUM_KEYS] = {0, 1, 2, 3, 4, 5, SLOT_KNOB_PRESS};
+
+#define DEBOUNCE_MS 20
+
+__xdata uint8_t keyStable[NUM_KEYS];
+__xdata uint8_t keyLast[NUM_KEYS];
+__xdata uint16_t keyChangedAt[NUM_KEYS];
+
+// Quadrature decoder: index = (prev << 2) | curr, value = step direction.
+// On this board a clockwise turn counts negative (checked with test_pinmap).
+__code int8_t encTable[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+uint8_t encPrev;
+int8_t encCount = 0;
+
+#define COLOR_OFF 0
+#define COLOR_IDLE 1
+#define COLOR_TYPING 2
+#define COLOR_SAVED 3
+#define COLOR_BOOT 4
+#define SAVED_FLASH_MS 300
+
+__xdata uint8_t ledData[3];
+uint8_t ledColor = COLOR_OFF;
+uint8_t savedFlash = 0;
+uint16_t savedAt;
+
+void showColor(uint8_t color) {
+  if (color == ledColor) {
+    return;
+  }
+  ledColor = color;
+  if (color == COLOR_IDLE) {
+    set_pixel_for_GRB_LED(ledData, 0, 0, 0, 12);
+  } else if (color == COLOR_TYPING) {
+    set_pixel_for_GRB_LED(ledData, 0, 0, 30, 0);
+  } else if (color == COLOR_SAVED) {
+    set_pixel_for_GRB_LED(ledData, 0, 30, 30, 30);
+  } else if (color == COLOR_BOOT) {
+    set_pixel_for_GRB_LED(ledData, 0, 30, 0, 0);
+  } else {
+    set_pixel_for_GRB_LED(ledData, 0, 0, 0, 0);
+  }
+  neopixel_show_P3_4(ledData, 3);
+}
+
+void updateLed() {
+  if (savedFlash) {
+    if ((uint16_t)((uint16_t)millis() - savedAt) < SAVED_FLASH_MS) {
+      showColor(COLOR_SAVED);
+      return;
+    }
+    savedFlash = 0;
+  }
+  showColor(macro_busy() ? COLOR_TYPING : COLOR_IDLE);
+}
+
+void jumpToBootloader() {
+  showColor(COLOR_BOOT);
+  USB_CTRL = 0;
+  EA = 0; // Disabling all interrupts is required.
+  TMOD = 0;
+  delayMicroseconds(50000);
+  delayMicroseconds(50000);
+
+  __asm__("lcall #0x3800"); // Jump to bootloader code
+
+  while (1)
+    ;
+}
+
+uint8_t readEncoder() {
+  return (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
+}
+
+void scanKeys() {
+  uint16_t now = (uint16_t)millis();
+
+  for (uint8_t i = 0; i < NUM_KEYS; i++) {
+    uint8_t pressed = !digitalRead(keyPins[i]);
+
+    if (pressed != keyLast[i]) {
+      keyLast[i] = pressed;
+      keyChangedAt[i] = now;
+    } else if (pressed != keyStable[i] &&
+               (uint16_t)(now - keyChangedAt[i]) >= DEBOUNCE_MS) {
+      keyStable[i] = pressed;
+      if (pressed) {
+        macro_enqueue(keySlots[i]);
+      }
+    }
+  }
+}
+
+void scanEncoder() {
+  uint8_t curr = readEncoder();
+
+  if (curr == encPrev) {
+    return;
+  }
+  encCount += encTable[(encPrev << 2) | curr];
+  encPrev = curr;
+
+  // One action per detent, when both lines are back at rest (high)
+  if (curr == 3 && encCount != 0) {
+    macro_enqueue(encCount < 0 ? SLOT_KNOB_CW : SLOT_KNOB_CCW);
+    encCount = 0;
+  }
+}
+
+void setup() {
+  for (uint8_t i = 0; i < NUM_KEYS; i++) {
+    pinMode(keyPins[i], INPUT_PULLUP);
+    keyStable[i] = 0;
+    keyLast[i] = 0;
+    keyChangedAt[i] = 0;
+  }
+  pinMode(PIN_ENC_A, INPUT_PULLUP);
+  pinMode(PIN_ENC_B, INPUT_PULLUP);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);
+
+  // Holding the knob while plugging in enters the bootloader
+  delay(20);
+  if (!digitalRead(PIN_KNOB_SW)) {
+    jumpToBootloader();
+  }
+
+  storage_init();
+  encPrev = readEncoder();
+  USBInit();
+  showColor(COLOR_IDLE);
+}
+
+void loop() {
+  uint8_t event = protocol_poll();
+
+  if (event == PROTO_EVT_BOOT) {
+    // Give the host a moment to collect the OK response
+    uint16_t start = (uint16_t)millis();
+    while (vendor_in_busy() && (uint16_t)((uint16_t)millis() - start) < 100)
+      ;
+    jumpToBootloader();
+  } else if (event == PROTO_EVT_SAVED) {
+    savedFlash = 1;
+    savedAt = (uint16_t)millis();
+  }
+
+  scanEncoder();
+  scanKeys();
+  macro_task();
+  updateLed();
+}

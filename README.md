@@ -2,6 +2,16 @@
 
 상용 CH552G 미니 매크로 키보드(키 6개 + 노브 1개)에 커스텀 펌웨어를 올려서, 키마다 **긴 문자열**을 HID 키보드 입력으로 출력하고 PC의 GUI 프로그램에서 문자열을 확인하고 수정하는 프로젝트입니다. 펌웨어 업로드, 설정, 문자열 출력을 모두 USB 포트 하나로 처리합니다.
 
+## 핵심 요구사항
+
+| # | 요구사항 | 현재 상태 |
+|---|---|---|
+| 1 | 시중 매크로 키보드의 **핀맵을 식별해서 펌웨어를 개조**할 것 | ✅ 핀맵 식별 완료(`firmware/test_pinmap`), 본 펌웨어 v1.0 작성 (실제 장치 테스트 전) |
+| 2 | **키마다 길게(약 20자)까지** 입력할 수 있을 것 (원래 제품은 약 8자) | ✅ 9개 슬롯이 **합계 102자**(DataFlash 128바이트)를 나눠 씀. 노브에 키 하나씩 넣으면 키 6개 합계 85자(평균 약 14자)이고, 키마다 길이는 자유롭게 배분. **GUI가 전체 글자 수와 남은 글자 수를 계산해서 저장 가능 여부를 알려줌** |
+
+> **결정 (2026-10-26)**: 코드 Flash에는 쓰지 않고 DataFlash만 사용합니다. 6개 키 모두 20자를 동시에 넣을 수는 없지만, 길이 배분은 GUI의 용량 표시로 관리합니다.
+| 3 | 노브는 **단순 기능**(방향키, Enter 등 키 하나)으로도 충분함 | ✅ 노브 시계 방향/반시계 방향/누르기에 키 하나 또는 짧은 매크로 할당 |
+
 ## 현재 상태
 
 | 항목 | 상태 |
@@ -9,7 +19,7 @@
 | 하드웨어 조사 (핀 매핑, LED, 부트로더) | ✅ 완료 (`firmware/test_pinmap`으로 확인) |
 | 설정 통신 규격 | ✅ [docs/PROTOCOL.md](docs/PROTOCOL.md) |
 | 설정 GUI | ✅ 가상 장치(`--mock`)로 동작 확인, 실제 장치와는 아직 미검증 |
-| 본 펌웨어 (규격 구현, 문자열 저장, 매크로 출력) | ⏳ 예정 |
+| 본 펌웨어 v1.0 ([firmware/macro_keyboard](firmware/macro_keyboard/)) | 🔶 빌드와 PC 검사(host_test) 통과, 실제 장치 테스트 전 |
 
 ## 하드웨어 요약
 
@@ -31,7 +41,9 @@
 | [PLAN.md](PLAN.md) | 전체 계획, 하드웨어 조사 기록, 단계별 진행 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 펌웨어와 GUI가 공유하는 Vendor HID 설정 통신 규격 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 빌드 오류, 업로드 실패와 복구 등 실제로 겪은 문제와 해결 방법 |
+| [firmware/macro_keyboard/](firmware/macro_keyboard/) | 본 펌웨어 (빌드, 업로드, 동작 테스트 방법 포함) |
 | [firmware/test_pinmap/](firmware/test_pinmap/) | 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
+| [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
 | [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록) |
 

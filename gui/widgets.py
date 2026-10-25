@@ -86,9 +86,11 @@ class DeviceView(QFrame):
         }[slot]
         mark = " *" if modified else ""
         preview = _preview(text) if text else "(비어 있음)"
+        length = macro.stored_length(text)  # bytes it takes in the device, macro text included
         btn = self.buttons[slot]
-        btn.setText(f"{name}{mark}\n{preview}")
-        btn.setToolTip(f"{p.SLOT_LABELS_KO[slot]}{' (저장 안 됨)' if modified else ''}")
+        btn.setText(f"{name}{mark} · {length}자\n{preview}")
+        btn.setToolTip(f"{p.SLOT_LABELS_KO[slot]} · {length}자"
+                       f"{' (저장 안 됨)' if modified else ''}")
         font = btn.font()
         font.setBold(modified)
         btn.setFont(font)

@@ -77,6 +77,30 @@ def test_invalid_slot_blocks_save(win):
     assert win.dialogs[-1][0] == "error"
 
 
+def test_slot_buttons_show_length(win):
+    win.connect_device()
+    assert f"· {len(SAMPLE_SLOTS[0])}자" in win.device_view.buttons[0].text()
+    win.set_slot_text(1, "x" * 20)
+    assert "· 20자" in win.device_view.buttons[1].text()
+    win.set_slot_text(2, "")
+    assert "· 0자" in win.device_view.buttons[2].text()
+
+
+def test_capacity_shows_characters_left(qapp):
+    # Same capacity as firmware v1.0 (128-byte DataFlash)
+    mock = MockDevice(capacity=128, storage=p.encode_blob(SAMPLE_SLOTS))
+    w = MainWindow(make_mock_connector(mock), auto_reconnect=False)
+    w.connect_device()
+    chars = sum(len(s) for s in SAMPLE_SLOTS)
+    assert f"{chars}자 입력" in w.capacity_bar.format()
+    assert f"{128 - p.blob_size(SAMPLE_SLOTS)}자 더 입력 가능" in w.capacity_bar.format()
+    w.set_slot_text(0, w.slots[0] + "x" * 10)  # 125 + 10 = 135 bytes
+    assert "7자 초과" in w.capacity_bar.format()
+    assert not w.save_btn.isEnabled()
+    w.baseline = list(w.slots)
+    w.close()
+
+
 def test_capacity_over_blocks_save(win):
     win.connect_device()
     win.set_slot_text(0, "x" * 5000)

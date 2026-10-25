@@ -19,14 +19,15 @@ from .transport import HidTransport, MockDevice, Transport, TransportError
 from .widgets import DeviceView, MacroEditor
 
 APP_TITLE = "매크로 키보드 설정 (6키 + 노브)"
-DEFAULT_CAPACITY = 4096
+DEFAULT_CAPACITY = 128  # firmware v1.0 stores the blob in the 128-byte DataFlash
 POLL_INTERVAL_MS = 2000
 TEST_COUNTDOWN_S = 3
 
+# Fits in 128 bytes (125 with header and slot lengths)
 SAMPLE_SLOTS = [
-    "Hello world{ENTER}", "{CTRL+C}", "{CTRL+V}",
-    "{WIN+R}{DELAY:300}notepad{ENTER}", "{ALT+TAB}", "{CTRL+SHIFT+ESC}",
-    "{RIGHT}", "{LEFT}", "{ENTER}",
+    "Hello{ENTER}", "{CTRL+C}", "{CTRL+V}",
+    "{WIN+R}{DELAY:300}calc{ENTER}", "{ALT+TAB}", "{CTRL+SHIFT+ESC}",
+    "{UP}", "{DOWN}", "{ENTER}",
 ]
 
 
@@ -176,15 +177,23 @@ class MainWindow(QMainWindow):
 
     def _refresh_capacity(self) -> None:
         used, cap = self.blob_size(), self.capacity
+        # Every stored character costs one byte (macro text like {ENTER} counts as typed);
+        # the rest of the blob is the fixed header and slot lengths.
+        chars = used - p.blob_size([""] * p.SLOT_COUNT)
         self.capacity_bar.setMaximum(cap)
         self.capacity_bar.setValue(min(used, cap))
         suffix = "" if self.connected else " (장치 미연결, 기본값 기준)"
         if used > cap:
-            self.capacity_bar.setFormat(f"{used} / {cap} 바이트 — 용량 초과!{suffix}")
+            self.capacity_bar.setFormat(
+                f"{chars}자 입력 · {used - cap}자 초과! ({used} / {cap} 바이트){suffix}")
             self.capacity_bar.setStyleSheet("QProgressBar::chunk { background: #c62828; }")
         else:
-            self.capacity_bar.setFormat(f"{used} / {cap} 바이트 ({used * 100 // cap}%){suffix}")
+            self.capacity_bar.setFormat(
+                f"{chars}자 입력 · {cap - used}자 더 입력 가능 ({used} / {cap} 바이트){suffix}")
             self.capacity_bar.setStyleSheet("")
+        self.capacity_bar.setToolTip(
+            "9개 슬롯 전체의 글자 수입니다. {ENTER} 같은 매크로 표기도 쓴 글자 수만큼 차지합니다.\n"
+            f"헤더와 슬롯 길이 정보로 {used - chars}바이트가 고정으로 쓰입니다.")
         self._refresh_buttons()
 
     def _refresh_connection(self) -> None:
@@ -454,7 +463,7 @@ def make_mock_connector(mock: MockDevice) -> Callable[[], Transport]:
 
 def build_window(use_mock: bool) -> MainWindow:
     if use_mock:
-        mock = MockDevice(storage=p.encode_blob(SAMPLE_SLOTS))
+        mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS))
         return MainWindow(make_mock_connector(mock), auto_reconnect=False, mock_label="모의 장치")
     return MainWindow(HidTransport.open_first, auto_reconnect=True)
 

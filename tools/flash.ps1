@@ -3,8 +3,11 @@
   Waits for the CH552 ROM bootloader (4348:55E0) and flashes a .hex the moment it appears.
 
 .DESCRIPTION
-  The bootloader leaves after about 5 seconds without traffic, so this script polls
-  for the device and starts CH55xduino's vnproch55x uploader immediately.
+  The bootloader leaves after about 5 seconds without traffic, so the uploader
+  (CH55xduino's vnproch55x) is started first and keeps retrying (-r) until the
+  device shows up and its WCH driver is ready. Polling Windows for the device first
+  is not enough: it can be listed before the driver opens, and the upload then fails
+  with "CH375GetUsbID 0 / No CH55x USB Found".
   The bootloader entry pin is written together with the firmware:
     P15 (default) = hold key D (P1.5) while plugging in
     P36           = D+ pull-up (1.5-2 kOhm between chip pin 12 and pin 16)
@@ -15,7 +18,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Hex,
     [ValidateSet('P15', 'P36')][string]$BootPin = 'P15',
-    [int]$TimeoutSec = 120
+    [ValidateRange(1, 255)][int]$TimeoutSec = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,22 +44,10 @@ if ($BootPin -eq 'P15') {
     Write-Host "Plug the keyboard in with the D+ pull-up connected..."
 }
 
-$end = (Get-Date).AddSeconds($TimeoutSec)
-$found = $false
-while ((Get-Date) -lt $end) {
-    if (Get-PnpDevice -InstanceId 'USB\VID_4348&PID_55E0*' -PresentOnly -ErrorAction SilentlyContinue) {
-        $found = $true
-        break
-    }
-    Start-Sleep -Milliseconds 150
-}
-if (-not $found) {
-    Write-Host "Timed out: bootloader not seen within $TimeoutSec s."
-    exit 2
-}
+Write-Host "(waiting up to $TimeoutSec s, started $(Get-Date -Format HH:mm:ss))"
 
-Write-Host "Bootloader found at $(Get-Date -Format HH:mm:ss.f), flashing..."
-& $exe -r 2 -t CH552 -c $bootCfg $hexPath
+# vnproch55x retries every ~0.1 s for -r seconds, then flashes as soon as it opens the device
+& $exe -r $TimeoutSec -t CH552 -c $bootCfg $hexPath
 $code = $LASTEXITCODE
 Write-Host "vnproch55x exit code: $code"
 exit $code
