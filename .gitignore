@@ -1,0 +1,14 @@
+# Arduino / CH55xDuino build output (Sketch -> Export Compiled Binary)
+firmware/**/build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
