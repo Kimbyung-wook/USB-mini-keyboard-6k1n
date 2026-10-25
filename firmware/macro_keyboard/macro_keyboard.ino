@@ -5,7 +5,7 @@
     slot (macro syntax in docs/PROTOCOL.md).
   - Interface 1: vendor HID for the config GUI (gui/), protocol v1.
   - Config is stored in the 128-byte DataFlash.
-  - LED (one WS2812 on P3.4): dim blue idle, green while typing,
+  - LED (WS2812 on P3.4): blue idle, green while typing,
     white flash after saving, red before jumping to the bootloader.
   - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
     plugging in, or send BOOT from the GUI.
@@ -54,29 +54,45 @@ int8_t encCount = 0;
 #define COLOR_SAVED 3
 #define COLOR_BOOT 4
 #define SAVED_FLASH_MS 300
+#define LED_REFRESH_MS 200
 
-__xdata uint8_t ledData[3];
+// Only one LED is visible, but which position in the chain it has is not
+// known, so every color is sent to 8 positions (as test_pinmap did).
+#define NUM_LEDS 8
+
+__xdata uint8_t ledData[NUM_LEDS * 3];
 uint8_t ledColor = COLOR_OFF;
+uint16_t ledSentAt;
 uint8_t savedFlash = 0;
 uint16_t savedAt;
 
+void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
+  for (uint8_t i = 0; i < NUM_LEDS; i++) {
+    set_pixel_for_GRB_LED(ledData, i, r, g, b);
+  }
+}
+
 void showColor(uint8_t color) {
-  if (color == ledColor) {
+  // Resend periodically even without a change, so a frame lost at power-up
+  // does not leave the LED dark
+  if (color == ledColor &&
+      (uint16_t)((uint16_t)millis() - ledSentAt) < LED_REFRESH_MS) {
     return;
   }
   ledColor = color;
   if (color == COLOR_IDLE) {
-    set_pixel_for_GRB_LED(ledData, 0, 0, 0, 12);
+    fillLeds(0, 0, 40);
   } else if (color == COLOR_TYPING) {
-    set_pixel_for_GRB_LED(ledData, 0, 0, 30, 0);
+    fillLeds(0, 40, 0);
   } else if (color == COLOR_SAVED) {
-    set_pixel_for_GRB_LED(ledData, 0, 30, 30, 30);
+    fillLeds(40, 40, 40);
   } else if (color == COLOR_BOOT) {
-    set_pixel_for_GRB_LED(ledData, 0, 30, 0, 0);
+    fillLeds(40, 0, 0);
   } else {
-    set_pixel_for_GRB_LED(ledData, 0, 0, 0, 0);
+    fillLeds(0, 0, 0);
   }
-  neopixel_show_P3_4(ledData, 3);
+  neopixel_show_P3_4(ledData, NUM_LEDS * 3);
+  ledSentAt = (uint16_t)millis();
 }
 
 void updateLed() {

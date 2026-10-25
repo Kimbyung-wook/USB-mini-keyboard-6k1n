@@ -17,7 +17,7 @@
 
 | 색 | 의미 |
 |---|---|
-| 어두운 파랑 | 대기 중 |
+| 파랑 | 대기 중 |
 | 초록 | 문자열 출력 중 |
 | 흰색 (0.3초) | 설정 저장 완료 |
 | 빨강 | 부트로더로 들어가는 중 |
@@ -51,7 +51,7 @@ Arduino IDE + CH55xDuino 0.0.26 (Windows는 [TROUBLESHOOTING 1-1](../../docs/TRO
 powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_keyboard\build\CH55xDuino.mcs51.ch552\macro_keyboard.ino.hex
 ```
 
-업로드 후 LED가 **어두운 파랑**으로 켜지면 펌웨어가 실행 중인 것입니다. 처음에는 DataFlash에 이전 제조사 설정이 남아 있어도 형식이 맞지 않으므로 **모든 슬롯이 비어 있는 상태**로 시작합니다.
+업로드 후 LED가 **파랑**으로 켜지면 펌웨어가 실행 중인 것입니다. 처음에는 DataFlash에 이전 제조사 설정이 남아 있어도 형식이 맞지 않으므로 **모든 슬롯이 비어 있는 상태**로 시작합니다.
 
 ## 동작 테스트
 
