@@ -65,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_gui.ps1
 
 ### 버전과 빌드 일자
 
-- 창 제목에 `v1.2.0`이, 상태 표시줄 오른쪽에 `GUI v1.2.0 · 빌드 2026-10-26 09:06`처럼 표시됩니다.
+- 창 제목에 `v1.3.0`이, 상태 표시줄 오른쪽에 `GUI v1.3.0 · 빌드 2026-10-26 09:06`처럼 표시됩니다.
 - **버전**은 `gui/version.py`의 `VERSION`을 직접 고칩니다.
 - **빌드 일자**는 `tools/build_gui.ps1`이 빌드하는 순간의 시각을 `gui/_build_info.py`에 써서 exe에 넣고, 빌드가 끝나면 이 파일을 지웁니다. 그래서 소스에서 바로 실행하면 `개발 실행 (빌드 전)`으로 표시됩니다.
 - PyInstaller를 직접 실행하면 빌드 일자가 들어가지 않으니 꼭 `build_gui.ps1`로 빌드하세요.
