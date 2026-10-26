@@ -71,11 +71,19 @@ powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 
 ### 버전과 빌드 날짜
 
-- **버전**은 `src/config.h`의 `FW_MAJOR`, `FW_MINOR`, `FW_PATCH`를 직접 고칩니다(지금 `1.2.1`). USB 장치 정보(bcdDevice)에도 같은 값이 들어갑니다.
+- **버전**은 `src/config.h`의 `FW_MAJOR`, `FW_MINOR`, `FW_PATCH`를 직접 고칩니다(지금 `1.3.0`). USB 장치 정보(bcdDevice)에도 같은 값이 들어갑니다.
 - **빌드 날짜**는 `tools/build_fw.ps1`이 빌드 순간의 시각을 컴파일 옵션(`-DFW_BUILD_YEAR=2026` 등)으로 넘깁니다. 컴파일러의 `__DATE__`를 쓰지 않는 이유: Arduino는 바뀌지 않은 파일을 다시 컴파일하지 않아서 예전 날짜가 남습니다.
 - GUI 연결 막대에 `펌웨어 v1.1.0 (빌드 2026-10-26 11:40)`처럼 표시됩니다. 펌웨어 1.0은 `펌웨어 v1.0`으로만 보입니다.
 
-확인 결과(2026-10-26, v1.2.1): 프로그램 8151바이트(56%), 전역 변수 357바이트(47%). v1.2.0(11587바이트, 80%)에서 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
+확인 결과(2026-10-26, v1.3.0): 프로그램 8268바이트(57%), 전역 변수 357바이트(47%). v1.2.1(8151바이트)에 HELLO 보드 정보와 펌웨어 식별 문자열이 더해졌습니다(+117바이트). v1.2.0(11587바이트, 80%)에서 v1.2.1로는 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
+
+### 보드 파일
+
+칩, 키/노브 수, 키 배치 행 수, 보드 이름, 핀 배치는 **보드 파일** `src/boards/<보드>.h`에 있습니다([docs/BOARD_INFO.md](../../docs/BOARD_INFO.md) 6). 지금은 `mk6k1n.h`(이 키보드) 하나입니다.
+
+- `tools/build_fw.ps1 -Board mk6k1n`이 `-DBOARD_MK6K1N`으로 보드를 고르고, 결과를 `build/macro_keyboard-MK6K1N.hex`로도 복사합니다(GUI의 펌웨어 업데이트 창이 먼저 고르는 파일). `-Board`를 빼면 `mk6k1n`입니다. Arduino IDE에서 빌드해도 `mk6k1n`이 됩니다.
+- 펌웨어는 HELLO 바이트 17~35로 보드 정보를 보내고([docs/PROTOCOL.md](../../docs/PROTOCOL.md)), hex 안에 식별 문자열 `MKFW1:<보드>:<칩>:<버전>`(예: `MKFW1:MK6K1N:CH552:1.3.0`)을 넣습니다. GUI는 올리기 전에 이 문자열로 보드와 칩을 확인합니다.
+- 보드 이름은 GUI의 보드 목록 `gui/boards.py`와 같아야 합니다.
 
 ## 업로드
 
@@ -96,7 +104,7 @@ Arduino IDE로 빌드했으면 `-Hex firmware\macro_keyboard\build\CH55xDuino.mc
 ### 1. 연결 확인
 
 1. GUI를 실행합니다: `gui\.venv\Scripts\python -m gui`
-2. 상단에 `● 연결됨 · 펌웨어 v1.2.1 (빌드 …) · 용량 128바이트`가 보이면 설정 통신이 되는 것입니다. 빌드 날짜가 방금 빌드한 시각인지도 확인하세요(새 펌웨어가 올라갔다는 표시).
+2. 상단에 `● 연결됨 · MK6K1N (키 6 + 노브 1) · 펌웨어 v1.3.0 (빌드 …) · 용량 128바이트`가 보이면 설정 통신이 되는 것입니다. 빌드 날짜가 방금 빌드한 시각인지도 확인하세요(새 펌웨어가 올라갔다는 표시).
 3. 처음에는 "설정 없음"으로 빈 슬롯 9개가 표시됩니다.
 
 ### 2. 테스트 문자열 넣기
@@ -163,7 +171,8 @@ GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바
 | 파일 | 내용 |
 |---|---|
 | `macro_keyboard.ino` | 키/노브 입력, LED, 부트로더 점프, 메인 루프 |
-| `src/config.h` | 핀, 버전, 용량, 잠금 설정값 |
+| `src/config.h` | 버전, 보드 파일 고르기, 슬롯 번호, 용량, 잠금 설정값 |
+| `src/boards/mk6k1n.h` | 이 키보드의 보드 정보(칩, 키/노브 수, 이름)와 핀 배치 |
 | `src/lock.c/.h` | 잠금 상태, 패턴 입력 판정, 틀린 횟수 |
 | `src/protocol.c/.h` | Vendor HID 명령 처리 (HELLO/READ/WRITE/COMMIT/TEST/BOOT) |
 | `src/storage.c/.h` | DataFlash 블롭 저장, CRC 검사, 슬롯 찾기 |

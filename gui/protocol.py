@@ -66,7 +66,8 @@ class Board:
     name: str = "MK6K1N"
     chip_id: int = 0x52                  # as the bootloader's Detect reports it
     features: int = BOARD_FEATURE_RGB_LED | BOARD_FEATURE_LOCK
-    uid: bytes = b""                     # chip unique ID, empty when unknown
+    # chip unique ID, empty when unknown; not part of the layout (==)
+    uid: bytes = field(default=b"", compare=False)
 
     def __post_init__(self):
         if self.keys < 1 or self.knobs < 0 or self.slot_count > MAX_SLOTS:

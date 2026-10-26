@@ -5,18 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from gui import flasher
+from gui import boards, chips, flasher
 
 ERASE = "\x1b[2K"
+CH552 = chips.find(0x52)
+FW_ID = "MKFW1:MK6K1N:CH552:1.3.0"
 
 
-def make_hex(path: Path, size: int, start: int = 0) -> Path:
-    """Intel HEX with `size` bytes of 0x00 from `start`, 16 bytes per record."""
+def make_hex(path: Path, size: int, start: int = 0, fid: str | None = None) -> Path:
+    """Intel HEX with `size` bytes of 0x00 from `start`, 16 bytes per record,
+    the firmware ID string (if any) at `start`."""
+    data = (fid.encode() + bytes(1) if fid else b"").ljust(size, bytes(1))[:size]
     lines = []
     addr = start
     while addr < start + size:
         n = min(16, start + size - addr)
-        rec = bytes([n, addr >> 8 & 0xFF, addr & 0xFF, 0]) + bytes(n)
+        rec = bytes([n, addr >> 8 & 0xFF, addr & 0xFF, 0]) + data[addr - start:addr - start + n]
         lines.append(":" + (rec + bytes([-sum(rec) & 0xFF])).hex().upper())
         addr += n
     lines.append(":00000001FF")
@@ -27,16 +31,27 @@ def make_hex(path: Path, size: int, start: int = 0) -> Path:
 # ---------------------------------------------------------------- hex file
 
 def test_hex_size_is_highest_address(tmp_path):
-    assert flasher.check_hex(make_hex(tmp_path / "a.hex", 11587)) == 11587
+    assert flasher.check_hex(make_hex(tmp_path / "a.hex", 11587), CH552).size == 11587
     assert flasher.hex_size(make_hex(tmp_path / "b.hex", 10, start=0x100)) == 0x10A
+    image = flasher.read_hex(make_hex(tmp_path / "c.hex", 2, start=4))
+    assert image == b"\xff" * 4 + bytes(2)                 # gaps read as erased flash
 
 
 def test_too_big_hex_rejected(tmp_path):
-    path = make_hex(tmp_path / "big.hex", flasher.FLASH_SIZE + 1)
+    path = make_hex(tmp_path / "big.hex", CH552.flash_size + 1)
     with pytest.raises(flasher.FlashError) as e:
-        flasher.check_hex(path)
-    assert "너무 큽니다" in str(e.value)
-    assert flasher.check_hex(make_hex(tmp_path / "max.hex", flasher.FLASH_SIZE)) == flasher.FLASH_SIZE
+        flasher.check_hex(path, CH552)
+    assert "너무 큽니다" in str(e.value) and "CH552" in str(e.value)
+    assert flasher.check_hex(make_hex(tmp_path / "max.hex", 14336), CH552).size == 14336
+    with pytest.raises(flasher.FlashError):                 # CH551 has less flash
+        flasher.check_hex(make_hex(tmp_path / "551.hex", 10241), chips.find(0x51))
+
+
+def test_firmware_id_read_from_hex(tmp_path):
+    info = flasher.check_hex(make_hex(tmp_path / "id.hex", 8000, fid=FW_ID), CH552)
+    assert info.firmware_id == flasher.FirmwareId("MK6K1N", "CH552", "1.3.0")
+    assert flasher.check_hex(make_hex(tmp_path / "old.hex", 8000), CH552).firmware_id is None
+    assert flasher.firmware_id(b"xxMKFW1:MK6K1N\0") is None        # incomplete
 
 
 @pytest.mark.parametrize("text, msg", [
@@ -49,18 +64,29 @@ def test_bad_hex_rejected(tmp_path, text, msg):
     path = tmp_path / "bad.hex"
     path.write_text(text, encoding="ascii")
     with pytest.raises(flasher.FlashError) as e:
-        flasher.check_hex(path)
+        flasher.check_hex(path, CH552)
     assert msg in str(e.value)
 
 
 def test_missing_file(tmp_path):
     with pytest.raises(flasher.FlashError):
-        flasher.check_hex(tmp_path / "none.hex")
+        flasher.check_hex(tmp_path / "none.hex", CH552)
 
 
 def test_command_matches_flash_ps1(tmp_path):
-    cmd = flasher.build_command(Path("up.exe"), tmp_path / "fw.hex", 30)
+    spec = boards.find("MK6K1N")
+    cmd = flasher.build_command(Path("up.exe"), tmp_path / "fw.hex", spec.chip.name, spec.boot_config, 30)
     assert cmd == ["up.exe", "-r", "30", "-t", "CH552", "-c", "1", str(tmp_path / "fw.hex")]
+
+
+def test_board_list():
+    spec = boards.find("MK6K1N")
+    assert spec.layout.slot_count == 9 and spec.chip_name == "CH552" and spec.chip.supported
+    assert spec.boot_config == boards.BOOT_P15 and spec.boot_hint == "키 D를 누른 채"
+    assert spec.firmware_file == "macro_keyboard-MK6K1N.hex"
+    assert boards.find("MK9K0N") is None
+    assert all(boards.find(b.name).layout.name == b.name for b in boards.BOARDS)
+    assert chips.name_of(0x54) == "CH554" and chips.name_of(0x59) == "CH559"
 
 
 def test_uploader_from_env(tmp_path, monkeypatch):
@@ -138,11 +164,16 @@ def chip(index=0, chip_id=0x52, uid=bytes.fromhex("7DE20FBD")):
     return ChipInfo(index, chip_id, 0x11, "2.5.0", uid)
 
 
-def make_dialog(tmp_path, chips, cmd=("unused",), prepare=lambda: "", hex_size=11587):
+def make_dialog(tmp_path, chips, cmd=("unused",), prepare=lambda: "", hex_size=11587,
+                fid=FW_ID, **kw):
     from gui.flash_dialog import FirmwareDialog
-    return FirmwareDialog(prepare, lambda hex_path: list(cmd),
-                          hex_path=make_hex(tmp_path / "fw.hex", hex_size),
-                          scan_fn=lambda: list(chips), auto_scan=False)
+    dlg = FirmwareDialog(prepare, lambda hex_path: list(cmd),
+                         hex_path=make_hex(tmp_path / "fw.hex", hex_size, fid=fid),
+                         scan_fn=lambda: list(chips), auto_scan=False, **kw)
+    dlg.asked = []
+    dlg.confirm = lambda title, text: (dlg.asked.append(text), dlg.answer)[1]
+    dlg.answer = True
+    return dlg
 
 
 def run_dialog(qapp, tmp_path, log, code, hex_size=11587):
@@ -172,7 +203,7 @@ def test_dialog_upload_timeout(qapp, tmp_path):
 
 
 def test_dialog_refuses_oversized_hex(qapp, tmp_path):
-    dlg = make_dialog(tmp_path, [chip()], hex_size=flasher.FLASH_SIZE + 16)
+    dlg = make_dialog(tmp_path, [chip()], hex_size=CH552.flash_size + 16)
     assert not dlg.start_btn.isEnabled() and not dlg.start()
     assert "너무 큽니다" in dlg.size_label.text()
 
@@ -204,6 +235,59 @@ def test_dialog_refuses_other_chip(qapp, tmp_path):
     assert dlg.chip_table.item(0, 1).text() == "CH554"
     assert not dlg.start_btn.isEnabled()
     assert "CH554" in dlg.chip_status.text()
+
+
+def test_dialog_shows_firmware_id_and_board(qapp, tmp_path):
+    dlg = make_dialog(tmp_path, [chip()])
+    assert "MK6K1N용 (CH552) v1.3.0" in dlg.size_label.text() and "✔" in dlg.size_label.text()
+    assert "키 D를 누른 채" in dlg.board_label.text() and "키 D를 누른 채" in dlg.hint.text()
+    assert dlg.hex_warning == "" and dlg.start_btn.isEnabled()
+
+
+def test_dialog_refuses_firmware_for_other_chip(qapp, tmp_path):
+    dlg = make_dialog(tmp_path, [chip()], fid="MKFW1:MK9K0N:CH573:1.3.0")
+    assert dlg.hex_size == 0 and not dlg.start_btn.isEnabled()
+    assert "CH573용 펌웨어" in dlg.size_label.text()
+
+
+@pytest.mark.parametrize("fid, warning", [
+    (None, "식별 정보가 없는"),
+    ("MKFW1:MK8K1N:CH552:1.3.0", "다른 키보드(MK8K1N)용"),
+])
+def test_dialog_asks_before_unchecked_firmware(qapp, tmp_path, fid, warning):
+    dlg = make_dialog(tmp_path, [chip()], fid=fid)
+    assert warning in dlg.size_label.text() and "⚠" in dlg.size_label.text()
+    assert dlg.start_btn.isEnabled()
+    dlg.answer = False
+    assert not dlg.start() and dlg.process is None           # declined: nothing runs
+    assert len(dlg.asked) == 1 and warning in dlg.asked[0]
+
+
+def test_dialog_unknown_board_cannot_flash(qapp, tmp_path):
+    from gui import protocol as p
+    dlg = make_dialog(tmp_path, [chip()], keyboard=p.Board(keys=9, knobs=0, rows=3, name="MK9K0N"))
+    assert not dlg.start_btn.isEnabled() and not dlg.start()
+    assert "보드 목록에 없는 키보드(MK9K0N)" in dlg.chip_status.text()
+    assert "보드 목록에 없는" in dlg.board_label.text()
+
+
+def test_dialog_marks_the_keyboard_that_was_connected(qapp, tmp_path):
+    from gui import protocol as p
+    keyboard = p.Board(uid=bytes.fromhex("7DE20FBD"))
+    dlg = make_dialog(tmp_path, [chip()], keyboard=keyboard)
+    assert dlg.chip_table.item(0, 2).text() == "7D-E2-0F-BD (방금 연결된 키보드)"
+    assert "방금 연결되어 있던 키보드" in dlg.chip_status.text()
+    other = make_dialog(tmp_path, [chip(uid=bytes.fromhex("01020304"))], keyboard=keyboard)
+    assert other.chip_table.item(0, 2).text() == "01-02-03-04" and other.start_btn.isEnabled()
+
+
+def test_dialog_default_command_uses_board_list(qapp, tmp_path, monkeypatch):
+    from gui.flash_dialog import FirmwareDialog
+    monkeypatch.setattr(flasher, "find_uploader", lambda: Path("up.exe"))
+    dlg = FirmwareDialog(lambda: "", hex_path=make_hex(tmp_path / "fw.hex", 100, fid=FW_ID),
+                         scan_fn=lambda: [], auto_scan=False)
+    cmd = dlg._command_fn(tmp_path / "fw.hex")
+    assert cmd[cmd.index("-t") + 1] == "CH552" and cmd[cmd.index("-c") + 1] == "1"
 
 
 def test_dialog_boot_button_runs_prepare(qapp, tmp_path):

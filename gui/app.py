@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from . import backup, macro
+from . import backup, boards, macro
 from . import protocol as p
 from .device import DeviceClient, DeviceError, DeviceStatusError, NotConnectedError
 from .transport import HidTransport, MockDevice, Transport, TransportError
@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
             except DeviceError as e:
                 self.disconnect_device()
                 return (f"업데이트 모드로 바꾸지 못했습니다 ({e}). "
-                        "키보드를 뽑았다가 키 D를 누른 채 다시 꽂으세요")
+                        f"키보드를 뽑았다가 {self.boot_hint} 다시 꽂으세요")
             self.client = None
             self.clear_config()
             return "키보드를 업데이트 모드로 바꿨습니다. 잠시 기다리세요 (보라색 LED)"
@@ -608,10 +608,17 @@ class MainWindow(QMainWindow):
         if self.connected:
             self.disconnect_device()
         return (f"키보드가 {reason} 자동으로 업데이트 모드로 바꿀 수 없습니다. "
-                "키보드를 뽑았다가 키 D를 누른 채 다시 꽂으세요")
+                f"키보드를 뽑았다가 {self.boot_hint} 다시 꽂으세요")
+
+    @property
+    def boot_hint(self) -> str:
+        """How to plug this keyboard in to reach the bootloader (board list)."""
+        spec = boards.find(self.board.name)
+        return spec.boot_hint if spec else "업데이트 모드 진입 방법대로"
 
     def make_firmware_dialog(self) -> FirmwareDialog:
-        return FirmwareDialog(self.prepare_bootloader, self.flash_command_fn, self)
+        return FirmwareDialog(self.prepare_bootloader, self.flash_command_fn, self,
+                              keyboard=self.board)
 
     def update_firmware(self) -> bool:
         if self._mock:

@@ -19,6 +19,22 @@ extern __xdata __at (EP2_ADDR + 64) uint8_t Ep2InBuffer[];
 #define req Ep2Buffer
 #define res Ep2InBuffer
 
+// HELLO bytes 17-31 (docs/BOARD_INFO.md 2); the chip's unique ID follows
+#define BOARD_INFO_SIZE 15
+__code struct {
+  uint8_t head[7];
+  char name[8];
+} boardInfo = {{BOARD_INFO_VERSION, BOARD_CHIP_ID, BOARD_KEYS, BOARD_KNOBS,
+                BOARD_ROWS, BOARD_FEATURES, 0},
+               BOARD_NAME};
+
+// Firmware ID that the GUI looks for in the .hex file before flashing it
+// (docs/BOARD_INFO.md 4): "MKFW1:<board>:<chip>:<version>"
+#define STR_(x) #x
+#define STR(x) STR_(x)
+__code char firmwareId[] = "MKFW1:" BOARD_NAME ":" BOARD_CHIP ":" STR(
+    FW_MAJOR) "." STR(FW_MINOR) "." STR(FW_PATCH);
+
 uint8_t protocol_poll(void) {
   __data uint8_t cmd;
   __data uint8_t status = ST_OK;
@@ -52,6 +68,12 @@ uint8_t protocol_poll(void) {
     res[14] = FW_BUILD_DAY;
     res[15] = FW_BUILD_HOUR;
     res[16] = FW_BUILD_MINUTE;
+    for (__data uint8_t i = 0; i < BOARD_INFO_SIZE; i++) {
+      res[17 + i] = ((__code uint8_t *)&boardInfo)[i];
+    }
+    for (__data uint8_t i = 0; i < 4; i++) {
+      res[32 + i] = *(__code uint8_t *)(ROM_CHIP_ID_LO + i);
+    }
     break;
 
   case CMD_READ: {

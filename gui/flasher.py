@@ -11,14 +11,11 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import chips
+
 UPLOADER_NAME = "vnproch55x.exe"
-CHIP = "CH552"
-FLASH_SIZE = 14336          # CH552 code flash usable by firmware (bootloader above)
-# Bootloader entry pin written with the firmware: 1 = P1.5 pull-down (key D on
-# this keyboard), 3 = P3.6 / D+ pull-up. A wrong value makes the bootloader
-# unreachable the usual way (docs/TROUBLESHOOTING.md 2-3), so it is fixed here.
-BOOT_CONFIG = 1
 WAIT_SECONDS = 60           # how long the uploader waits for the bootloader
+MAX_IMAGE = 1 << 20         # larger addresses are not a CH55x firmware
 
 
 class FlashError(Exception):
@@ -46,20 +43,43 @@ def find_uploader() -> Path:
                      "Arduino IDE에 CH55xDuino를 설치하거나, 업로더가 포함된 exe를 사용하세요")
 
 
-def build_command(uploader: Path, hex_path: Path, wait_seconds: int = WAIT_SECONDS) -> list[str]:
-    return [str(uploader), "-r", str(wait_seconds), "-t", CHIP, "-c", str(BOOT_CONFIG), str(hex_path)]
+def build_command(uploader: Path, hex_path: Path, chip: str, boot_config: int,
+                  wait_seconds: int = WAIT_SECONDS) -> list[str]:
+    """chip: -t value ("CH552"). boot_config: -c, the bootloader entry pin
+    written with the firmware (boards.BOOT_P15 / BOOT_P36). A wrong one makes
+    the bootloader unreachable the usual way (docs/TROUBLESHOOTING.md 2-3), so
+    it comes from the board list, never from the user."""
+    return [str(uploader), "-r", str(wait_seconds), "-t", chip, "-c", str(boot_config), str(hex_path)]
 
 
 # ---------------------------------------------------------------- hex file
 
-def hex_size(path: str | Path) -> int:
-    """Bytes of code flash an Intel HEX file uses (highest address + 1)."""
+FIRMWARE_ID_PREFIX = b"MKFW1:"
+
+
+@dataclass(frozen=True)
+class FirmwareId:
+    """"MKFW1:<board>:<chip>:<version>" that our firmware carries (1.3.0 and later)."""
+    board: str
+    chip: str
+    version: str
+
+
+@dataclass(frozen=True)
+class HexInfo:
+    size: int
+    firmware_id: FirmwareId | None     # None: older or someone else's firmware
+
+
+def read_hex(path: str | Path) -> bytes:
+    """Code flash image of an Intel HEX file, from address 0 to the highest
+    address written (gaps read as 0xFF, like erased flash)."""
     try:
         lines = Path(path).read_text(encoding="ascii").splitlines()
     except (OSError, UnicodeDecodeError) as e:
         raise FlashError(f"펌웨어 파일을 읽을 수 없습니다: {e}") from e
     base = 0
-    end = 0
+    records: list[tuple[int, bytes]] = []
     seen_eof = False
     for n, line in enumerate(lines, 1):
         line = line.strip()
@@ -75,7 +95,7 @@ def hex_size(path: str | Path) -> int:
             raise FlashError(f"HEX 파일이 손상되었습니다 ({n}번째 줄, 체크섬)")
         count, addr, rtype = raw[0], (raw[1] << 8) | raw[2], raw[3]
         if rtype == 0x00:
-            end = max(end, base + addr + count)
+            records.append((base + addr, raw[4:4 + count]))
         elif rtype == 0x01:
             seen_eof = True
             break
@@ -85,16 +105,40 @@ def hex_size(path: str | Path) -> int:
             base = ((raw[4] << 8) | raw[5]) << 16
     if not seen_eof:
         raise FlashError("HEX 파일이 끝까지 있지 않습니다 (EOF 레코드 없음)")
+    end = max((addr + len(data) for addr, data in records), default=0)
     if end == 0:
         raise FlashError("HEX 파일에 데이터가 없습니다")
-    return end
+    if end > MAX_IMAGE:
+        raise FlashError(f"CH55x 펌웨어가 아닙니다 (주소 0x{end:X}까지 씀)")
+    image = bytearray(b"\xff" * end)
+    for addr, data in records:
+        image[addr:addr + len(data)] = data
+    return bytes(image)
 
 
-def check_hex(path: str | Path) -> int:
-    size = hex_size(path)
-    if size > FLASH_SIZE:
-        raise FlashError(f"펌웨어가 너무 큽니다 ({size}바이트, {CHIP} 최대 {FLASH_SIZE}바이트)")
-    return size
+def firmware_id(image: bytes) -> FirmwareId | None:
+    start = image.find(FIRMWARE_ID_PREFIX)
+    if start < 0:
+        return None
+    end = image.find(b"\0", start)
+    text = image[start + len(FIRMWARE_ID_PREFIX):end if end >= 0 else None]
+    parts = text.decode("ascii", errors="replace").split(":")
+    if len(parts) != 3 or not all(parts):
+        return None
+    return FirmwareId(*parts)
+
+
+def check_hex(path: str | Path, chip: chips.Chip) -> HexInfo:
+    """Read the file and check that it fits the chip's flash."""
+    image = read_hex(path)
+    if len(image) > chip.flash_size:
+        raise FlashError(f"펌웨어가 너무 큽니다 ({len(image)}바이트, {chip.name} 최대 {chip.flash_size}바이트)")
+    return HexInfo(len(image), firmware_id(image))
+
+
+def hex_size(path: str | Path) -> int:
+    """Bytes of code flash an Intel HEX file uses (highest address + 1)."""
+    return len(read_hex(path))
 
 
 # ---------------------------------------------------------------- output

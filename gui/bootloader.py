@@ -12,6 +12,7 @@ import struct
 import sys
 from dataclasses import dataclass
 
+from . import chips
 from .flasher import FlashError
 
 DLL_NAME = "CH375DLL64.dll" if struct.calcsize("P") == 8 else "CH375DLL.dll"
@@ -36,7 +37,7 @@ class ChipInfo:
 
     @property
     def part(self) -> str:
-        return f"CH5{self.chip_id & 0x7F:02X}" if self.chip_id else "알 수 없음"
+        return chips.name_of(self.chip_id)
 
     @property
     def serial(self) -> str:

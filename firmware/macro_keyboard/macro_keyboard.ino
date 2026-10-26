@@ -1,5 +1,6 @@
 /*
   macro_keyboard: firmware for the 6-key + 1-knob CH552G mini keyboard
+  (board MK6K1N, src/boards/mk6k1n.h)
 
   - Interface 0: HID keyboard. Each key/knob action types the text of its
     slot (macro syntax in docs/PROTOCOL.md).
@@ -38,15 +39,11 @@
 #include "src/macro.h"
 #include "src/usb/hid.h"
 
-#define NUM_KEYS 7
-#define KNOB_KEY 6 // index of the knob switch below
-// Slot order: A, B, C, D, E, F, knob press. The first P1_KEYS are on P1,
-// the rest on P3 (checked in config.h).
-#define P1_KEYS 5
-__code uint8_t keyBits[NUM_KEYS] = {
-    PIN_BIT(PIN_KEY_A), PIN_BIT(PIN_KEY_B), PIN_BIT(PIN_KEY_C), PIN_BIT(PIN_KEY_D),
-    PIN_BIT(PIN_KEY_E), PIN_BIT(PIN_KEY_F), PIN_BIT(PIN_KNOB_SW)};
-__code uint8_t keySlots[NUM_KEYS] = {0, 1, 2, 3, 4, 5, SLOT_KNOB_PRESS};
+// Switches: the keys (switch i types slot i), then the knob switch. Port and
+// bit of each come from the board file.
+#define NUM_KEYS (BOARD_KEYS + 1)
+#define KNOB_KEY BOARD_KEYS // index of the knob switch
+__code uint8_t keyBits[NUM_KEYS] = {BOARD_SWITCH_BITS};
 
 #define DEBOUNCE_MS 20
 
@@ -212,7 +209,7 @@ uint8_t readEncoder() {
 
 void scanKeys() {
   for (uint8_t i = 0; i < NUM_KEYS; i++) {
-    uint8_t pressed = !((i < P1_KEYS ? P1 : P3) & keyBits[i]);
+    uint8_t pressed = !((i < BOARD_P1_SWITCHES ? P1 : P3) & keyBits[i]);
 
     if (pressed != keyLast[i]) {
       keyLast[i] = pressed;
@@ -227,7 +224,7 @@ void scanKeys() {
           knobUp();
         }
       } else if (pressed) {
-        onInput(keySlots[i]);
+        onInput(i);
       }
     }
   }
