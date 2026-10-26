@@ -163,8 +163,8 @@ class DeviceClient:
             raise DeviceError(f"설정을 만들 수 없습니다: {e}") from e
         info = self._require_info()
         if lock and not info.supports_lock:
-            raise DeviceError(f"펌웨어 v{info.fw_version}은 잠금 패턴을 지원하지 않습니다. "
-                              "펌웨어를 업데이트하거나 잠금 패턴을 지우세요")
+            raise DeviceError(f"펌웨어 v{info.fw_version}은 패턴 암호를 지원하지 않습니다. "
+                              "펌웨어를 업데이트하거나 패턴 암호를 지우세요")
         cap = info.capacity
         if check_capacity and len(blob) > cap:
             raise ConfigTooBigError(len(blob), cap)

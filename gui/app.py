@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         self.capacity_bar.setToolTip(
             "9개 슬롯 전체의 글자 수입니다. {ENTER} 같은 매크로 표기도 쓴 글자 수만큼 차지합니다.\n"
             f"헤더와 슬롯 길이 정보로 {p.blob_size([''] * p.SLOT_COUNT)}바이트가 고정으로 쓰입니다."
-            + (f"\n잠금 패턴이 {used - chars - p.blob_size([''] * p.SLOT_COUNT)}바이트를 씁니다."
+            + (f"\n패턴 암호가 {used - chars - p.blob_size([''] * p.SLOT_COUNT)}바이트를 씁니다."
                if self.lock else ""))
         self._refresh_buttons()
 
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
                 self.conn_label.setText(f"🔒 잠김 {head} — 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요")
                 self.conn_label.setStyleSheet("font-weight: bold; color: #c62828;")
             elif info.locked:
-                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 잠금 패턴을 입력하세요")
+                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하세요")
                 self.conn_label.setStyleSheet("font-weight: bold; color: #e65100;")
             else:
                 self.conn_label.setText(f"● 연결됨 {head}")
@@ -247,8 +247,11 @@ class MainWindow(QMainWindow):
                                  and p.lock_error(self.lock) is None)
         self.test_btn.setEnabled(unlocked and self._countdown == 0)
         self.refresh_btn.setEnabled(True)
+        # Nothing to show or edit without a keyboard (see clear_config)
+        for w in (self.device_view, self.editor, self.export_btn, self.import_btn):
+            w.setEnabled(on)
         supported = not on or self.client.info.supports_lock
-        self.lock_editor.setEnabled(supported or bool(self.lock))  # still lets a pattern be cleared
+        self.lock_editor.setEnabled(on and (supported or bool(self.lock)))  # still lets a pattern be cleared
         self.lock_editor.setToolTip("" if supported else
                                     "이 펌웨어는 잠금을 지원하지 않습니다 (펌웨어 v1.1 이상 필요)")
 
@@ -320,7 +323,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("장치에 연결했습니다", 3000)
         if client.info.locked:
             self.statusBar().showMessage(
-                "장치가 잠겨 있습니다. 키보드에서 잠금 패턴을 입력하면 설정을 읽어옵니다", 8000)
+                "장치가 잠겨 있습니다. 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하면 설정을 읽어옵니다", 8000)
         elif not self.has_unsaved():
             self.read_from_device(confirm=False)
         else:
@@ -331,7 +334,22 @@ class MainWindow(QMainWindow):
         if self.client:
             self.client.close()
         self.client = None
+        self.clear_config()
+
+    def clear_config(self) -> None:
+        """Forget the slot texts and the lock pattern on screen.
+
+        They are only shown while a keyboard is connected and open: they are
+        cleared when it is disconnected or locks again, and read from the
+        device again afterwards.
+        """
+        self.slots = [""] * p.SLOT_COUNT
+        self.baseline = [""] * p.SLOT_COUNT
+        self.lock = []
+        self.lock_baseline = []
+        self.editor.set_slot(self.current, "")
         self._refresh_all()
+        self._update_title()
 
     def refresh_status(self) -> None:
         if not self.connected:
@@ -349,24 +367,23 @@ class MainWindow(QMainWindow):
         was_locked = self.device_locked
         self.client.hello()
         self._refresh_connection()
-        if was_locked and not self.device_locked:
+        if not was_locked and self.device_locked:
+            self.clear_config()
+            self.statusBar().showMessage("키보드가 다시 잠겨서 화면의 설정을 지웠습니다", 5000)
+        elif was_locked and not self.device_locked:
             self.statusBar().showMessage("잠금이 풀렸습니다", 3000)
             if not self.has_unsaved():
                 self.read_from_device(confirm=False)
 
     def _poll_device(self) -> None:
-        """Auto-reconnect when a keyboard appears; notice when it is unplugged
-        or unlocked."""
+        """Auto-reconnect when a keyboard appears; notice when it is unplugged,
+        unlocked or locked again (holding the knob on the keyboard)."""
         if self._countdown:
             return
         if not self.connected:
             self.connect_device(quiet=True)
-        elif self.device_locked:
-            try:
-                self.check_lock()
-            except DeviceError:
-                self.disconnect_device()
-        elif isinstance(self.client.transport, HidTransport):
+            return
+        if isinstance(self.client.transport, HidTransport):
             try:
                 present = bool(HidTransport.find_paths())
             except TransportError:
@@ -374,16 +391,21 @@ class MainWindow(QMainWindow):
             if not present:
                 self.disconnect_device()
                 self.statusBar().showMessage("장치 연결이 끊겼습니다", 5000)
+                return
+        if self.client.info.supports_lock:
+            try:
+                self.check_lock()
+            except DeviceError:
+                self.disconnect_device()
 
     def _handle_device_error(self, title: str, e: Exception) -> None:
         if isinstance(e, NotConnectedError):
             self.disconnect_device()
         elif isinstance(e, DeviceStatusError) and e.status == p.Status.LOCKED:
             try:
-                self.client.hello()   # show the lock in the connection bar
+                self.check_lock()     # show the lock, clear the screen
             except DeviceError:
                 pass
-            self._refresh_connection()
         self.error(title, str(e))
 
     # ------------------------------------------------------------ device actions
@@ -430,11 +452,11 @@ class MainWindow(QMainWindow):
         was_locked = self.device_locked
         if was_locked:
             question = ("장치가 잠겨 있어 저장된 설정을 읽지 못했습니다.\n"
-                        "저장하면 장치의 기존 문자열과 잠금 패턴을 모두 지우고 지금 화면의 내용으로 바꿉니다.\n\n"
+                        "저장하면 장치의 기존 문자열과 패턴 암호를 모두 지우고 지금 화면의 내용으로 바꿉니다.\n\n"
                         f"9개 슬롯 전체({size}바이트)를 저장할까요?")
         else:
             question = f"9개 슬롯 전체({size}바이트)를 장치에 저장할까요?"
-        lock_note = f"\n잠금 패턴: {p.lock_text(self.lock)}" if self.lock else "\n잠금 패턴: 없음"
+        lock_note = f"\n패턴 암호: {p.lock_text(self.lock)}" if self.lock else "\n패턴 암호: 없음"
         if confirm and not self.ask("장치에 저장", question + lock_note):
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -454,7 +476,7 @@ class MainWindow(QMainWindow):
         if confirm:
             msg = f"장치에 저장했습니다 ({size}바이트)."
             if self.lock and not self.device_locked:
-                msg += "\n잠금 패턴은 키보드를 다시 꽂을 때부터 적용됩니다."
+                msg += "\n패턴 암호는 키보드를 다시 꽂을 때부터 적용됩니다."
             self.inform("저장 완료", msg)
         return True
 
@@ -504,6 +526,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ JSON backup
     def export_json(self, path: str | None = None) -> bool:
+        if not self.connected:
+            self.error("내보내기", "장치를 연결한 뒤에 내보낼 수 있습니다")
+            return False
         path = path or self.choose_save_path()
         if not path:
             return False
@@ -516,6 +541,9 @@ class MainWindow(QMainWindow):
         return True
 
     def import_json(self, path: str | None = None) -> bool:
+        if not self.connected:
+            self.error("불러오기", "장치를 연결한 뒤에 불러올 수 있습니다")
+            return False
         path = path or self.choose_open_path()
         if not path:
             return False

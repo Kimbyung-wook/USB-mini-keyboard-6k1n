@@ -276,5 +276,17 @@ def test_lock_needs_protocol_2():
     assert not info.supports_lock and not info.locked
     with pytest.raises(DeviceError) as e:
         client.write_config([""] * 9, lock=LOCK)
-    assert "잠금" in str(e.value)
+    assert "패턴 암호" in str(e.value)
     assert mock.commit_count == 0
+
+
+def test_mock_relock_rules():
+    _, mock = make(MockDevice(storage=p.encode_blob([""] * 9, LOCK)))
+    mock.enter_pattern(LOCK)
+    for _ in range(4):
+        mock.relock([5, 5, 5, 5])
+    assert not mock.locked
+    mock.relock([5, 5, 5, 5])                 # fifth wrong re-lock: locks anyway
+    assert mock.locked and mock.lock_fails == 0
+    mock.enter_pattern(LOCK)
+    assert not mock.locked

@@ -3,7 +3,7 @@
 
 // Firmware version reported by HELLO and the USB device descriptor
 #define FW_MAJOR 1
-#define FW_MINOR 1
+#define FW_MINOR 2
 #define FW_PATCH 0
 
 // Build date reported by HELLO, passed in by tools/build_fw.ps1
@@ -36,14 +36,16 @@
 #define SLOT_KNOB_CCW 7
 #define SLOT_KNOB_PRESS 8
 
-// Lock pattern (docs/PROTOCOL.md "잠금 패턴"): optional slot 9 of the blob,
+// Lock pattern (docs/PROTOCOL.md "패턴 암호"): optional slot 9 of the blob,
 // one byte per step holding the slot number of the input (0-8)
 #define SLOT_LOCK 9
 #define LOCK_MIN_STEPS 4
 #define LOCK_MAX_STEPS 8
 #define LOCK_MAX_FAILS 5          // then inputs are ignored until replugged
-#define LOCK_INPUT_TIMEOUT_MS 3000 // a pause this long starts the pattern over
-#define LOCK_WRONG_FLASH_MS 400    // LED goes dark this long after a wrong try
+#define LOCK_HOLD_MS 3000          // knob hold that starts a pattern entry
+// A pause this long cancels a pattern entry (unlock / re-lock)
+#define LOCK_UNLOCK_TIMEOUT_MS 10000
+#define LOCK_RELOCK_TIMEOUT_MS 10000
 
 // Config blob lives in the 128-byte DataFlash
 #define BLOB_CAPACITY 128

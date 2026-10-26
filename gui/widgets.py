@@ -218,9 +218,11 @@ class MacroEditor(QWidget):
 
 
 LOCK_HELP = (
-    "키보드를 꽂으면 LED가 빨간색으로 잠기고, 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
-    "잠긴 동안에는 아무것도 입력되지 않고 GUI에서 읽기·테스트 입력도 할 수 없습니다. "
-    "5번 틀리면 키보드를 다시 꽂아야 합니다. 비워 두면 잠금을 쓰지 않습니다."
+    "키보드를 꽂으면 잠긴 상태(LED 꺼짐, 가끔 빨간색 깜빡)로 시작하고 키를 눌러도 반응하지 않습니다. "
+    "노브를 3초 누르면 빨간색이 계속 켜지고, 이때 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
+    "풀린 상태에서 노브를 3초 누르고 같은 패턴을 입력하면 다시 잠깁니다(5번 틀려도 잠김). "
+    "잠긴 동안에는 GUI에서 읽기·테스트 입력도 할 수 없고, 풀기를 5번 틀리면 빨간색이 계속 깜빡이며 다시 꽂아야 합니다. "
+    "비워 두면 잠금을 쓰지 않습니다."
 )
 
 
@@ -230,7 +232,7 @@ class LockPatternEditor(QGroupBox):
     patternChanged = Signal(list)
 
     def __init__(self, parent: QWidget | None = None):
-        super().__init__("잠금 패턴", parent)
+        super().__init__("패턴 암호", parent)
         self.steps: list[int] = []
 
         self.display = QLabel()
@@ -284,7 +286,7 @@ class LockPatternEditor(QGroupBox):
         self._refresh()
 
     def set_modified(self, modified: bool) -> None:
-        self.setTitle("잠금 패턴 *" if modified else "잠금 패턴")
+        self.setTitle("패턴 암호 *" if modified else "패턴 암호")
 
     def add_step(self, slot: int) -> None:
         if len(self.steps) < p.LOCK_MAX_STEPS:

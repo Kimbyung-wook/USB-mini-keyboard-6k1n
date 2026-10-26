@@ -190,10 +190,25 @@ class MockDevice(Transport):
         if list(steps) == self.stored_config().lock:
             self.lock_state = LOCK_OPEN
             self.lock_fails = 0
+            self.relock_fails = 0
             return
         self.lock_fails += 1
         if self.lock_fails >= LOCK_MAX_FAILS:
             self.lock_state = LOCK_BLOCKED
+
+    def relock(self, steps: list[int]) -> None:
+        """Knob hold plus a pattern on an open keyboard: the right one locks,
+        and so does the fifth wrong one in a row."""
+        lock = self.stored_config().lock
+        if self.lock_state != LOCK_OPEN or not lock:
+            return
+        if list(steps) != lock:
+            self.relock_fails += 1
+            if self.relock_fails < LOCK_MAX_FAILS:
+                return
+        self.lock_state = LOCK_LOCKED
+        self.lock_fails = 0
+        self.relock_fails = 0
 
     @property
     def locked(self) -> bool:
@@ -203,6 +218,7 @@ class MockDevice(Transport):
         has_lock = self.protocol >= 2 and bool(self.stored_config().lock)
         self.lock_state = LOCK_LOCKED if has_lock else LOCK_OPEN
         self.lock_fails = 0
+        self.relock_fails = 0
 
     def _lock_flags(self) -> int:
         flags = p.LOCK_FLAG_SET if self.stored_config().lock else 0

@@ -52,7 +52,7 @@ uint8_t protocol_poll(void) {
   case CMD_READ: {
     __data uint16_t offset = U16(req[2], req[3]);
     __data uint8_t len = req[4];
-    if (lock_state() != LOCK_OPEN) {
+    if (lock_locked()) {
       status = ST_LOCKED;
       break;
     }
@@ -93,7 +93,7 @@ uint8_t protocol_poll(void) {
     break;
 
   case CMD_TEST:
-    if (lock_state() != LOCK_OPEN) {
+    if (lock_locked()) {
       status = ST_LOCKED;
     } else if (req[2] >= SLOT_COUNT) {
       status = ST_BAD_ARG;
@@ -105,7 +105,7 @@ uint8_t protocol_poll(void) {
     break;
 
   case CMD_BOOT:
-    if (lock_state() != LOCK_OPEN) {
+    if (lock_locked()) {
       status = ST_LOCKED;
     } else {
       event = PROTO_EVT_BOOT;

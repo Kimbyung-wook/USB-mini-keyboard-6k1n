@@ -5,11 +5,15 @@
     slot (macro syntax in docs/PROTOCOL.md).
   - Interface 1: vendor HID for the config GUI (gui/), protocol v2.
   - Config is stored in the 128-byte DataFlash.
-  - Lock: with a lock pattern stored, it starts locked (red LED) and types
-    nothing until the pattern is entered on the keys/knob (then blue).
-  - LED (WS2812 on P3.4): red while locked (dark flash on a wrong try,
-    blinking after too many), blue idle, green while typing,
-    white flash after saving, purple before jumping to the bootloader.
+  - Lock (README.md "잠금 상태도"): with a lock pattern stored, it starts
+    locked and ignores every input. Holding the knob for 3 s starts a
+    pattern entry: the pattern unlocks it. On an open keyboard the same hold
+    and pattern lock it again (five wrong re-lock tries lock it as well).
+  - LED (WS2812 on P3.4): locked = dark with a short red blink every 3 s,
+    pattern entry = solid red, blocked (five wrong unlock tries) = red
+    blinking, open = blue, green for a moment on every key press (and while
+    typing), white flash after saving, purple before jumping to the
+    bootloader.
   - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
     plugging in, or send BOOT from the GUI.
 
@@ -35,6 +39,7 @@
 #include "src/usb/hid.h"
 
 #define NUM_KEYS 7
+#define KNOB_KEY 6 // index of the knob switch below
 // Slot order: A, B, C, D, E, F, knob press
 __code uint8_t keyPins[NUM_KEYS] = {PIN_KEY_A, PIN_KEY_B, PIN_KEY_C, PIN_KEY_D,
                                     PIN_KEY_E, PIN_KEY_F, PIN_KNOB_SW};
@@ -57,9 +62,12 @@ int8_t encCount = 0;
 #define COLOR_TYPING 2
 #define COLOR_SAVED 3
 #define COLOR_BOOT 4
-#define COLOR_LOCKED 5
+#define COLOR_RED 5
 #define SAVED_FLASH_MS 300
-#define BLOCKED_BLINK_SHIFT 9 // blink period 2 x 512 ms
+#define PRESS_FLASH_MS 200      // green at least this long after a key press
+#define LOCKED_BLINK_PERIOD 3000 // locked: one short red blink per period
+#define LOCKED_BLINK_MS 100
+#define BLOCKED_BLINK_SHIFT 9   // blocked: blink period 2 x 512 ms
 #define LED_REFRESH_MS 200
 
 // Only one LED is visible, but which position in the chain it has is not
@@ -71,6 +79,8 @@ uint8_t ledColor = COLOR_OFF;
 uint16_t ledSentAt;
 uint8_t savedFlash = 0;
 uint16_t savedAt;
+uint8_t pressFlash = 0;
+uint16_t pressAt;
 
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
@@ -94,7 +104,7 @@ void showColor(uint8_t color) {
     fillLeds(40, 40, 40);
   } else if (color == COLOR_BOOT) {
     fillLeds(40, 0, 40);
-  } else if (color == COLOR_LOCKED) {
+  } else if (color == COLOR_RED) {
     fillLeds(40, 0, 0);
   } else {
     fillLeds(0, 0, 0);
@@ -111,13 +121,20 @@ void updateLed() {
     }
     savedFlash = 0;
   }
+  if (pressFlash &&
+      (uint16_t)((uint16_t)millis() - pressAt) >= PRESS_FLASH_MS) {
+    pressFlash = 0;
+  }
   if (lock_state() == LOCK_BLOCKED) {
     showColor(((uint16_t)millis() >> BLOCKED_BLINK_SHIFT) & 1 ? COLOR_OFF
-                                                               : COLOR_LOCKED);
+                                                               : COLOR_RED);
+  } else if (lock_entering()) {
+    showColor(COLOR_RED);
   } else if (lock_state() == LOCK_LOCKED) {
-    showColor(lock_wrong_flash() ? COLOR_OFF : COLOR_LOCKED);
+    showColor(millis() % LOCKED_BLINK_PERIOD < LOCKED_BLINK_MS ? COLOR_RED
+                                                                : COLOR_OFF);
   } else {
-    showColor(macro_busy() ? COLOR_TYPING : COLOR_IDLE);
+    showColor(macro_busy() || pressFlash ? COLOR_TYPING : COLOR_IDLE);
   }
 }
 
@@ -135,12 +152,43 @@ void jumpToBootloader() {
     ;
 }
 
-// A key or knob action: typed when open, otherwise part of the lock pattern
+// A key or knob action: a pattern step during a pattern entry, typed when
+// open, ignored when locked
 void onInput(uint8_t slot) {
-  if (lock_state() == LOCK_OPEN) {
-    macro_enqueue(slot);
-  } else {
+  if (lock_entering()) {
     lock_input(slot);
+  } else if (lock_state() == LOCK_OPEN) {
+    macro_enqueue(slot);
+    pressFlash = 1; // green even for an empty slot
+    pressAt = (uint16_t)millis();
+  }
+}
+
+// Knob switch. With a lock pattern stored, a press is typed on release so
+// that holding it for LOCK_HOLD_MS can start a pattern entry instead.
+uint8_t knobHeld = 0; // a press still waiting for release or the hold time
+uint16_t knobDownAt;
+
+void knobDown(uint16_t now) {
+  if (lock_entering() || !storage_lock_len()) {
+    onInput(SLOT_KNOB_PRESS);
+    return;
+  }
+  knobHeld = 1;
+  knobDownAt = now;
+}
+
+void knobUp() {
+  if (knobHeld) {
+    knobHeld = 0;
+    onInput(SLOT_KNOB_PRESS); // a short press: typed when open
+  }
+}
+
+void checkKnobHold(uint16_t now) {
+  if (knobHeld && (uint16_t)(now - knobDownAt) >= LOCK_HOLD_MS) {
+    knobHeld = 0;
+    lock_start_entry();
   }
 }
 
@@ -160,11 +208,18 @@ void scanKeys() {
     } else if (pressed != keyStable[i] &&
                (uint16_t)(now - keyChangedAt[i]) >= DEBOUNCE_MS) {
       keyStable[i] = pressed;
-      if (pressed) {
+      if (i == KNOB_KEY) {
+        if (pressed) {
+          knobDown(now);
+        } else {
+          knobUp();
+        }
+      } else if (pressed) {
         onInput(keySlots[i]);
       }
     }
   }
+  checkKnobHold(now);
 }
 
 void scanEncoder() {
@@ -224,6 +279,7 @@ void loop() {
 
   scanEncoder();
   scanKeys();
+  lock_task();
   macro_task();
   updateLed();
 }

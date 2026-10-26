@@ -57,9 +57,9 @@ def lock_error(lock: list[int]) -> str | None:
     if not lock:
         return None
     if any(not 0 <= s < SLOT_COUNT for s in lock):
-        return "잠금 패턴에 알 수 없는 입력이 있습니다"
+        return "패턴 암호에 알 수 없는 입력이 있습니다"
     if not LOCK_MIN_STEPS <= len(lock) <= LOCK_MAX_STEPS:
-        return f"잠금 패턴은 {LOCK_MIN_STEPS}~{LOCK_MAX_STEPS}단계여야 합니다 (지금 {len(lock)}단계)"
+        return f"패턴 암호는 {LOCK_MIN_STEPS}~{LOCK_MAX_STEPS}단계여야 합니다 (지금 {len(lock)}단계)"
     return None
 
 
@@ -95,7 +95,7 @@ STATUS_MESSAGES_KO = {
     Status.TOO_BIG: "저장 용량을 초과했습니다",
     Status.FLASH_ERR: "장치의 Flash 지우기/쓰기에 실패했습니다",
     Status.BUSY: "장치가 문자열을 출력하는 중입니다. 잠시 후 다시 시도하세요",
-    Status.LOCKED: "장치가 잠겨 있습니다. 키보드에서 잠금 패턴을 입력하세요",
+    Status.LOCKED: "장치가 잠겨 있습니다. 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하세요",
 }
 
 

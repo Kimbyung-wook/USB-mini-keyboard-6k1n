@@ -4,9 +4,10 @@
 //        host_test <blob.bin> tail <blob2.bin>
 // Stages and commits the blob in 56-byte chunks, then types every slot and
 // prints the key reports, e.g. "slot 0: 02:0b 00:08 D50 ...".
-// "lock": each argument is a string of input numbers (0-8) entered on the
-// keyboard, a leading "t" first waits out the input timeout; prints the lock
-// state after each. "tail": commits blob2 over the blob and counts the
+// "lock": each argument is a sequence of input numbers (0-8) entered on the
+// keyboard, "H" for holding the knob (starts a pattern entry), "t" for
+// waiting out the entry timeout and "w" for a 6 s pause;
+// prints the lock state after each. "tail": commits blob2 over the blob and counts the
 // DataFlash bytes past blob2 that are not blank.
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,18 +78,23 @@ static uint8_t writeBlob(uint8_t *blob, size_t n) {
 }
 
 static void runLock(int count, char **inputs) {
-  static const char *names[] = {"open", "locked", "blocked"};
+  static const char *names[] = {"open", "locked", "blocked", "unlocking", "relock"};
   lock_init();
   printf("lock %s flags %u\n", names[lock_state()], lock_flags());
   for (int i = 0; i < count; i++) {
-    const char *s = inputs[i];
-    if (*s == 't') {
-      now += LOCK_INPUT_TIMEOUT_MS;
-      s++;
-    }
-    for (; *s; s++) {
+    for (const char *s = inputs[i]; *s; s++) {
       now += 100;
-      lock_input((uint8_t)(*s - '0'));
+      if (*s == 'H') {
+        lock_start_entry(); // the knob was held for LOCK_HOLD_MS
+      } else if (*s == 't') {
+        now += LOCK_UNLOCK_TIMEOUT_MS;
+        lock_task();
+      } else if (*s == 'w') {
+        now += 6000;
+        lock_task();
+      } else {
+        lock_input((uint8_t)(*s - '0'));
+      }
     }
     printf("lock %s flags %u\n", names[lock_state()], lock_flags());
   }

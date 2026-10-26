@@ -180,7 +180,7 @@ def test_lock_editor_builds_pattern(win):
     ed.input_buttons[p.SLOT_KNOB_CW].click()
     ed.input_buttons[p.SLOT_KNOB_PRESS].click()
     assert ed.display.text() == "A → D → ↻ → ●"
-    assert win.save_btn.isEnabled() and "잠금 패턴 *" == ed.title()
+    assert win.save_btn.isEnabled() and "패턴 암호 *" == ed.title()
     for _ in range(10):
         ed.input_buttons[1].click()
     assert len(win.lock) == p.LOCK_MAX_STEPS
@@ -220,7 +220,7 @@ def test_connect_locked_does_not_read_then_unlock_reads(qapp):
     assert w.connect_device()
     assert w.device_locked and w.slots == [""] * 9
     assert not any(r.cmd == p.Cmd.READ for r in w.mock.requests)
-    assert "패턴을 입력" in w.conn_label.text()
+    assert "패턴 암호를 입력" in w.conn_label.text()
 
     w.mock.enter_pattern([5, 5, 5, 5])          # wrong
     w._poll_device()
@@ -275,3 +275,63 @@ def test_firmware_version_and_build_date_shown(qapp):
     w.connect_device()
     assert "펌웨어 v1.1.0 (빌드 2026-10-26 11:40)" in w.conn_label.text()
     w.close()
+
+
+def test_poll_notices_relock_and_unlock(qapp):
+    w = locked_window(qapp)
+    w.mock.enter_pattern(LOCK)
+    w.connect_device()
+    assert not w.device_locked and w.read_btn.isEnabled()
+    w.mock.relock(LOCK)                      # knob hold + pattern on the keyboard
+    w._poll_device()
+    assert w.device_locked and not w.read_btn.isEnabled()
+    assert "노브를 3초" in w.conn_label.text()
+    w.mock.enter_pattern(LOCK)
+    w._poll_device()
+    assert not w.device_locked
+    w.close()
+
+
+# ---------------------------------------------------------------- nothing shown without a keyboard
+
+def test_startup_shows_nothing_and_cannot_edit(qapp):
+    w = MainWindow(make_mock_connector(MockDevice()), auto_reconnect=False)
+    assert w.slots == [""] * 9 and w.lock == []
+    for widget in (w.device_view, w.editor, w.lock_editor, w.export_btn, w.import_btn):
+        assert not widget.isEnabled()
+    w.dialogs = []
+    w.error = lambda t, m: w.dialogs.append((t, m))
+    assert not w.import_json("unused.json") and not w.export_json("unused.json")
+    w.close()
+
+
+def test_disconnect_clears_slots_and_lock(win):
+    win.connect_device()
+    win.set_lock(LOCK)
+    assert win.save_to_device(confirm=False)
+    win.set_slot_text(0, "unsaved edit")
+    win.disconnect_device()
+    assert win.slots == [""] * 9 and win.lock == [] and not win.has_unsaved()
+    assert "없음" in win.lock_editor.display.text()
+    assert win.editor.text() == ""
+    assert not win.windowTitle().startswith("*")
+    assert win.connect_device()                 # read back from the device
+    assert win.slots == SAMPLE_SLOTS and win.lock == LOCK
+
+
+def test_relock_clears_screen(qapp):
+    w = locked_window(qapp)
+    w.mock.enter_pattern(LOCK)
+    w.connect_device()
+    assert w.slots[0] == SAMPLE_SLOTS[0] and w.lock == LOCK
+    w.mock.relock(LOCK)
+    w._poll_device()
+    assert w.device_locked and w.slots == [""] * 9 and w.lock == []
+    w.close()
+
+
+def test_unplug_clears_screen(win):
+    win.connect_device()
+    win.mock.connected = False
+    win.read_from_device(confirm=False)         # fails: the keyboard is gone
+    assert not win.connected and win.slots == [""] * 9

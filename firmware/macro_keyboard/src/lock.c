@@ -5,38 +5,45 @@
 #include "storage.h"
 // clang-format on
 
+// States and transitions: README.md "잠금 상태도"
 static __xdata uint8_t state = LOCK_OPEN;
 static __xdata uint8_t entered[LOCK_MAX_STEPS];
 static __xdata uint8_t enteredLen = 0;
-static __xdata uint8_t fails = 0;
+static __xdata uint8_t unlockFails = 0; // wrong unlock tries; LOCK_MAX_FAILS blocks
+static __xdata uint8_t relockFails = 0; // wrong re-lock tries; LOCK_MAX_FAILS locks
 static __xdata uint16_t lastInputAt;
-static __xdata uint8_t wrongFlash = 0;
-static __xdata uint16_t wrongAt;
 
 void lock_init(void) {
   state = storage_lock_len() ? LOCK_LOCKED : LOCK_OPEN;
   enteredLen = 0;
-  fails = 0;
-  wrongFlash = 0;
+  unlockFails = 0;
+  relockFails = 0;
 }
 
 void lock_config_changed(void) {
   // Saving while open keeps it open (the owner is at the GUI); the new
   // pattern applies from the next plug-in. A config written while locked
-  // replaced everything, so its own pattern decides.
-  if (state != LOCK_OPEN) {
+  // replaced everything, so its own pattern decides. A pattern entry in
+  // progress is dropped, since the pattern it checks against may have
+  // changed.
+  if (lock_locked()) {
     lock_init();
+  } else {
+    state = LOCK_OPEN;
+    relockFails = 0;
   }
 }
 
 uint8_t lock_state(void) { return state; }
+
+uint8_t lock_locked(void) { return state != LOCK_OPEN && state != LOCK_RELOCK; }
 
 uint8_t lock_flags(void) {
   __data uint8_t flags = 0;
   if (storage_lock_len()) {
     flags |= LOCK_FLAG_SET;
   }
-  if (state != LOCK_OPEN) {
+  if (lock_locked()) {
     flags |= LOCK_FLAG_LOCKED;
   }
   if (state == LOCK_BLOCKED) {
@@ -45,47 +52,77 @@ uint8_t lock_flags(void) {
   return flags;
 }
 
+uint8_t lock_start_entry(void) {
+  if (state == LOCK_LOCKED) {
+    state = LOCK_UNLOCKING;
+  } else if (state == LOCK_OPEN && storage_lock_len()) {
+    state = LOCK_RELOCK;
+  } else {
+    return 0;
+  }
+  enteredLen = 0;
+  lastInputAt = (uint16_t)millis();
+  return 1;
+}
+
+uint8_t lock_entering(void) {
+  return state == LOCK_UNLOCKING || state == LOCK_RELOCK;
+}
+
+static void lockNow(void) {
+  state = LOCK_LOCKED;
+  unlockFails = 0;
+  relockFails = 0;
+}
+
+void lock_task(void) {
+  // An entry left unfinished is cancelled without counting as a wrong try
+  __data uint16_t idle = (uint16_t)millis() - lastInputAt;
+
+  if (state == LOCK_UNLOCKING && idle >= LOCK_UNLOCK_TIMEOUT_MS) {
+    state = LOCK_LOCKED;
+  } else if (state == LOCK_RELOCK && idle >= LOCK_RELOCK_TIMEOUT_MS) {
+    state = LOCK_OPEN;
+  }
+}
+
 void lock_input(__data uint8_t slot) {
-  __data uint16_t now = (uint16_t)millis();
   __data uint8_t len = storage_lock_len();
   __xdata uint8_t *steps = storage_lock_steps();
   __data uint8_t match = 1;
 
-  if (state != LOCK_LOCKED) {
+  // Outside a pattern entry (started by holding the knob) inputs are ignored
+  if (!lock_entering()) {
     return;
   }
-  if (enteredLen && (uint16_t)(now - lastInputAt) >= LOCK_INPUT_TIMEOUT_MS) {
-    enteredLen = 0;
-  }
-  lastInputAt = now;
+  lastInputAt = (uint16_t)millis();
   entered[enteredLen++] = slot;
   if (enteredLen < len) {
     return;
   }
 
-  // A full-length try: compare it all, then start over
+  // A full-length try: compare it all
   enteredLen = 0;
   for (__data uint8_t i = 0; i < len; i++) {
     if (entered[i] != steps[i]) {
       match = 0;
     }
   }
-  if (match) {
-    state = LOCK_OPEN;
-    fails = 0;
+  if (state == LOCK_RELOCK) {
+    // The right pattern locks; wrong ones go back to open, and the fifth
+    // wrong one in a row locks anyway
+    if (match || ++relockFails >= LOCK_MAX_FAILS) {
+      lockNow();
+    } else {
+      state = LOCK_OPEN;
+    }
     return;
   }
-  wrongFlash = 1;
-  wrongAt = now;
-  if (++fails >= LOCK_MAX_FAILS) {
-    state = LOCK_BLOCKED;
+  if (match) {
+    state = LOCK_OPEN;
+    unlockFails = 0;
+    relockFails = 0;
+    return;
   }
-}
-
-uint8_t lock_wrong_flash(void) {
-  if (wrongFlash &&
-      (uint16_t)((uint16_t)millis() - wrongAt) >= LOCK_WRONG_FLASH_MS) {
-    wrongFlash = 0;
-  }
-  return wrongFlash;
+  state = ++unlockFails >= LOCK_MAX_FAILS ? LOCK_BLOCKED : LOCK_LOCKED;
 }

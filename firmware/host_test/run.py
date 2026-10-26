@@ -129,25 +129,61 @@ def main() -> int:
         short = ["Hi{ENTER}", "{CTRL+C}"] + [""] * 7
         lock = [0, 1, 2, 6]
         locked_blob = p.encode_blob(short, lock)
-        lines = run(exe, out, locked_blob, extra=["lock", "0124", "0126"])
+        # H = knob held 3 s (starts a pattern entry), t = entry timeout
+        lines = run(exe, out, locked_blob, extra=["lock", "0126", "H", "0126"])
         check("lock blob commits", lines[2], "commit status 0")
-        check("wrong try stays locked, right one opens", " | ".join(lock_states(lines)),
-              "locked 3 | locked 3 | open 1")
+        check("locked ignores inputs until the knob hold, then the pattern opens",
+              " | ".join(lock_states(lines)), "locked 3 | locked 3 | unlocking 3 | open 1")
 
-        lines = run(exe, out, locked_blob, extra=["lock"] + ["1111"] * 5 + ["0126"])
+        lines = run(exe, out, locked_blob, extra=["lock", "H0124", "H0126"])
+        check("wrong try goes back to locked, next try opens", " | ".join(lock_states(lines)[1:]),
+              "locked 3 | open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock"] + ["H1111"] * 5 + ["H0126"])
         states = lock_states(lines)
         check("5 wrong tries block", states[5], "blocked 7")
-        check("blocked ignores the right pattern", states[6], "blocked 7")
+        check("blocked ignores the hold and the right pattern", states[6], "blocked 7")
 
-        lines = run(exe, out, locked_blob, extra=["lock", "4", "01", "t0126"])
-        check("stray input then a pause starts over", " | ".join(lock_states(lines)[1:]),
-              "locked 3 | locked 3 | open 1")
+        lines = run(exe, out, locked_blob, extra=["lock"] + ["H01t"] * 6 + ["H0126"])
+        states = lock_states(lines)
+        check("unfinished entries time out without counting", states[6], "locked 3")
+        check("...and the pattern still opens after them", states[7], "open 1")
 
-        lines = run(exe, out, locked_blob, extra=["lock", "0126012"])
+        lines = run(exe, out, locked_blob, extra=["lock", "H0126012"])
         check("extra inputs after opening are ignored", lock_states(lines)[1], "open 1")
 
-        lines = run(exe, out, p.encode_blob(short), extra=["lock"])
-        check("no pattern starts open", lock_states(lines)[0], "open 0")
+        lines = run(exe, out, locked_blob, extra=["lock", "H0126", "H", "0126", "H0126"])
+        check("re-lock: hold + pattern locks again, then unlocks again",
+              " | ".join(lock_states(lines)[1:]), "open 1 | relock 1 | locked 3 | open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock", "H0126", "H0124", "H01t"])
+        check("re-lock: wrong pattern or timeout stays open",
+              " | ".join(lock_states(lines)[1:]), "open 1 | open 1 | open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock", "H0126"] + ["H1111"] * 5 + ["H0126"])
+        states = lock_states(lines)
+        check("re-lock: 4 wrong tries stay open", states[5], "open 1")
+        check("re-lock: 5th wrong try locks anyway", states[6], "locked 3")
+        check("...and it unlocks normally afterwards", states[7], "open 1")
+
+        lines = run(exe, out, locked_blob,
+                    extra=["lock", "H0126"] + ["H1111"] * 5 + ["H1111"] * 4 + ["H0126"])
+        check("auto-lock gives 5 fresh unlock tries (4 wrong, then right)",
+              lock_states(lines)[-1], "open 1")
+
+        lines = run(exe, out, locked_blob,
+                    extra=["lock", "H0126"] + ["H1111"] * 4 + ["H0126", "H0126"] + ["H1111"] * 4)
+        check("re-lock failures reset after a successful re-lock and unlock",
+              lock_states(lines)[-1], "open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock", "H01w26", "H01w26"])
+        # Both entries wait 10 s, so the pattern still finishes after the pause
+        check("6 s pause: unlock and re-lock entries (10 s) go on",
+              " | ".join(lock_states(lines)[1:]), "open 1 | locked 3")
+
+        lines = run(exe, out, p.encode_blob(short), extra=["lock", "H"])
+        check("no pattern starts open and the hold does nothing",
+              " | ".join(lock_states(lines)), "open 0 | open 0")
 
         got = slot_lines(run(exe, out, locked_blob))
         check("slots still type next to the lock slot", f"{got[0]} | {got[1]} | {got[8]}",
