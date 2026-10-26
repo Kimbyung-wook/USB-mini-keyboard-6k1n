@@ -88,24 +88,25 @@ static __code KeyName modNames[] = {
 #if QUEUE_SIZE & (QUEUE_SIZE - 1)
 #error QUEUE_SIZE must be a power of two
 #endif
-static __xdata uint8_t queue[QUEUE_SIZE];
-static __xdata uint8_t queueHead;
-static __xdata uint8_t queueCount;
+// Internal RAM (__data): much shorter code than xdata under --model-large
+static __data uint8_t queue[QUEUE_SIZE];
+static __data uint8_t queueHead;
+static __data uint8_t queueCount;
 
 // Current playback
-static __xdata uint8_t active;
-static __xdata uint8_t *text;
-static __xdata uint8_t textLen;
-static __xdata uint8_t pos;
-static __xdata uint8_t needRelease;
-static __xdata uint8_t delaying;
-static __xdata uint16_t delayMs;
-static __xdata uint32_t delayStart;
+static __data uint8_t active;
+static __xdata uint8_t *__data text; // points to xdata, kept in internal RAM
+static __data uint8_t textLen;
+static __data uint8_t pos;
+static __data uint8_t needRelease;
+static __data uint8_t delaying;
+static __data uint16_t delayMs;
+static __data uint32_t delayStart;
 
 // Result of parsing one token
-static __xdata uint8_t tokMods;
-static __xdata uint8_t tokKey;
-static __xdata uint16_t tokDelay;
+static __data uint8_t tokMods;
+static __data uint8_t tokKey;
+static __data uint16_t tokDelay;
 
 #define TOK_NONE 0  // nothing to send (invalid token, skipped)
 #define TOK_KEY 1   // tokMods + tokKey

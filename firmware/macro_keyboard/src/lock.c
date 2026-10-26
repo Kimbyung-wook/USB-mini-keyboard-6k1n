@@ -6,12 +6,13 @@
 // clang-format on
 
 // States and transitions: README.md "잠금 상태도"
-static __xdata uint8_t state = LOCK_OPEN;
-static __xdata uint8_t entered[LOCK_MAX_STEPS];
-static __xdata uint8_t enteredLen = 0;
-static __xdata uint8_t unlockFails = 0; // wrong unlock tries; LOCK_MAX_FAILS blocks
-static __xdata uint8_t relockFails = 0; // wrong re-lock tries; LOCK_MAX_FAILS locks
-static __xdata uint16_t lastInputAt;
+// Internal RAM (__data): much shorter code than xdata under --model-large
+static __data uint8_t state; // LOCK_OPEN
+static __data uint8_t entered[LOCK_MAX_STEPS];
+static __data uint8_t enteredLen;
+static __data uint8_t unlockFails; // wrong unlock tries; LOCK_MAX_FAILS blocks
+static __data uint8_t relockFails; // wrong re-lock tries; LOCK_MAX_FAILS locks
+static __data uint16_t lastInputAt;
 
 void lock_init(void) {
   state = storage_lock_len() ? LOCK_LOCKED : LOCK_OPEN;

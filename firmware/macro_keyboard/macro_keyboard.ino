@@ -54,8 +54,10 @@ __xdata uint16_t keyChangedAt[NUM_KEYS];
 // Quadrature decoder: index = (prev << 2) | curr, value = step direction.
 // On this board a clockwise turn counts negative (checked with test_pinmap).
 __code int8_t encTable[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
-uint8_t encPrev;
-int8_t encCount;
+// Small state in this file sits in indirect internal RAM (__idata): shorter
+// code than xdata, and __data is already used by macro.c and lock.c
+__idata uint8_t encPrev;
+__idata int8_t encCount;
 
 #define COLOR_OFF 0
 #define COLOR_IDLE 1
@@ -75,13 +77,13 @@ int8_t encCount;
 #define NUM_LEDS 8
 
 __xdata uint8_t ledData[NUM_LEDS * 3];
-uint8_t ledColor; // COLOR_OFF
-uint16_t ledSentAt;
-uint8_t savedFlash;
-uint16_t savedAt;
-uint8_t pressFlash;
-uint16_t pressAt;
-uint16_t blinkAt; // start of the current locked blink period
+__idata uint8_t ledColor; // COLOR_OFF
+__idata uint16_t ledSentAt;
+__idata uint8_t savedFlash;
+__idata uint16_t savedAt;
+__idata uint8_t pressFlash;
+__idata uint16_t pressAt;
+__idata uint16_t blinkAt; // start of the current locked blink period
 
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
   // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
@@ -176,8 +178,8 @@ void onInput(uint8_t slot) {
 
 // Knob switch. With a lock pattern stored, a press is typed on release so
 // that holding it for LOCK_HOLD_MS can start a pattern entry instead.
-uint8_t knobHeld; // a press still waiting for release or the hold time
-uint16_t knobDownAt;
+__idata uint8_t knobHeld; // a press still waiting for release or the hold time
+__idata uint16_t knobDownAt;
 
 void knobDown(uint16_t now) {
   if (lock_entering() || !storage_lock_len()) {
