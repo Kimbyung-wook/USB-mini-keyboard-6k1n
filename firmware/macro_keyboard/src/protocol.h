@@ -1,9 +1,9 @@
 #ifndef __MK_PROTOCOL_H__
 #define __MK_PROTOCOL_H__
 
-// Vendor HID protocol v1 (docs/PROTOCOL.md)
+// Vendor HID protocol v2 (docs/PROTOCOL.md)
 
-#define PROTO_VERSION 1
+#define PROTO_VERSION 2
 #define PROTO_MAX_CHUNK 56
 
 #define CMD_HELLO 0x01
@@ -20,6 +20,7 @@
 #define ST_TOO_BIG 4
 #define ST_FLASH_ERR 5
 #define ST_BUSY 6
+#define ST_LOCKED 7 // READ/TEST/BOOT refused until the lock pattern is entered
 
 #define PROTO_EVT_NONE 0
 #define PROTO_EVT_BOOT 1  // host asked to jump to the bootloader

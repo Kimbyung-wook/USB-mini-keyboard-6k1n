@@ -9,6 +9,7 @@
 | 1 | 시중 매크로 키보드의 **핀맵을 식별해서 펌웨어를 개조**할 것 | ✅ 핀맵 식별 완료(`firmware/test_pinmap`), 본 펌웨어 v1.0 작성, 실제 장치에서 동작 확인 (2026-10-26) |
 | 2 | **키마다 길게(약 20자)까지** 입력할 수 있을 것 (원래 제품은 약 8자) | ✅ 9개 슬롯이 **합계 102자**(DataFlash 128바이트)를 나눠 씀. 노브에 키 하나씩 넣으면 키 6개 합계 85자(평균 약 14자)이고, 키마다 길이는 자유롭게 배분. **GUI가 전체 글자 수와 남은 글자 수를 계산해서 저장 가능 여부를 알려줌** |
 | 3 | 노브는 **단순 기능**(방향키, Enter 등 키 하나)으로도 충분함 | ✅ 노브 시계 방향/반시계 방향/누르기에 키 하나 또는 짧은 매크로 할당 |
+| 4 | 아무나 눌러 쓰지 못하도록 **연결할 때마다 사용자 정의 패턴을 입력해야 출력**될 것. 패턴은 GUI에서 설정. 입력 전 빨간 LED, 통과 후 파란 LED | ✅ 펌웨어 v1.1 / GUI 1.1, 실제 장치에서 동작 확인 (2026-10-26) |
 
 > **결정 (2026-10-26)**: 코드 Flash에는 쓰지 않고 DataFlash만 사용합니다. 6개 키 모두 20자를 동시에 넣을 수는 없지만, 길이 배분은 GUI의 용량 표시로 관리합니다.
 
@@ -20,6 +21,7 @@
 | 설정 통신 규격 | ✅ [docs/PROTOCOL.md](docs/PROTOCOL.md) |
 | 설정 GUI | ✅ 실제 장치와 동작 확인 (2026-10-26). 키보드 없이 `--mock`으로도 실행 가능 |
 | 본 펌웨어 v1.0 ([firmware/macro_keyboard](firmware/macro_keyboard/)) | ✅ 실제 장치에서 동작 확인 (2026-10-26). 빌드와 PC 검사(host_test) 통과 |
+| 잠금 패턴 (펌웨어 v1.1, 프로토콜 v2) | ✅ 실제 장치에서 동작 확인 (2026-10-26). 빌드, host_test, GUI 테스트 통과. 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#4-잠금-확인) |
 
 ## 하드웨어 요약
 
@@ -45,11 +47,15 @@
 | [firmware/test_pinmap/](firmware/test_pinmap/) | 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
 | [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
-| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
+| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
 
 ## 빠른 시작
 
-**펌웨어 빌드**: Arduino IDE + CH55xDuino 0.0.26. 보드 설정과 Windows 빌드 오류 패치는 [firmware/test_pinmap/README.md](firmware/test_pinmap/README.md)를 보세요.
+**펌웨어 빌드**: Arduino IDE + CH55xDuino 0.0.26. 보드 설정과 Windows 빌드 오류 패치는 [firmware/test_pinmap/README.md](firmware/test_pinmap/README.md)를 보세요. 빌드 일자를 넣으려면 스크립트로 빌드합니다(버전은 `firmware/macro_keyboard/src/config.h`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
+```
 
 **펌웨어 업로드**
 

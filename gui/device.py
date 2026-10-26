@@ -110,7 +110,7 @@ class DeviceClient:
     def hello(self) -> p.HelloInfo:
         resp = self._request(p.Cmd.HELLO)
         info = p.parse_hello_result(resp.result)
-        if info.protocol_version != p.PROTOCOL_VERSION:
+        if info.protocol_version not in p.SUPPORTED_PROTOCOL_VERSIONS:
             raise IncompatibleDeviceError(
                 f"지원하지 않는 프로토콜 버전입니다 (장치 v{info.protocol_version}, "
                 f"프로그램 v{p.PROTOCOL_VERSION}). 펌웨어 또는 프로그램을 업데이트하세요")
@@ -155,13 +155,17 @@ class DeviceClient:
         return p.decode_blob(self.read_blob(progress))
 
     def write_config(self, slots: list[str], progress: Progress | None = None,
-                     check_capacity: bool = True) -> int:
+                     check_capacity: bool = True, lock: list[int] | tuple[int, ...] = ()) -> int:
         """WRITE the encoded blob in chunks, then COMMIT. Returns blob size."""
         try:
-            blob = p.encode_blob(slots)
+            blob = p.encode_blob(slots, lock)
         except p.BlobError as e:
             raise DeviceError(f"설정을 만들 수 없습니다: {e}") from e
-        cap = self._require_info().capacity
+        info = self._require_info()
+        if lock and not info.supports_lock:
+            raise DeviceError(f"펌웨어 v{info.fw_version}은 잠금 패턴을 지원하지 않습니다. "
+                              "펌웨어를 업데이트하거나 잠금 패턴을 지우세요")
+        cap = info.capacity
         if check_capacity and len(blob) > cap:
             raise ConfigTooBigError(len(blob), cap)
         for offset in range(0, len(blob), p.MAX_CHUNK):

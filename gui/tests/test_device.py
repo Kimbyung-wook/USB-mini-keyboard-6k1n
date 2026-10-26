@@ -2,7 +2,7 @@ import pytest
 
 from gui import protocol as p
 from gui.device import (
-    ConfigTooBigError, DeviceClient, DeviceStatusError, DeviceTimeoutError,
+    ConfigTooBigError, DeviceClient, DeviceError, DeviceStatusError, DeviceTimeoutError,
     IncompatibleDeviceError, NotConnectedError,
 )
 from gui.transport import MockDevice, TransportError
@@ -21,7 +21,7 @@ def cmds(mock: MockDevice, cmd: int) -> list[p.Request]:
 def test_hello():
     client, _ = make(MockDevice(capacity=2048, fw=(1, 2)))
     info = client.hello()
-    assert (info.protocol_version, info.fw_version, info.slot_count, info.capacity) == (1, "1.2", 9, 2048)
+    assert (info.protocol_version, info.fw_version, info.slot_count, info.capacity) == (2, "1.2.0", 9, 2048)
 
 
 def test_blank_device_reads_as_no_config():
@@ -194,7 +194,7 @@ def test_incompatible_protocol_version():
     class OldDevice(MockDevice):
         def _handle(self, req):
             if req.cmd == p.Cmd.HELLO:
-                return p.encode_response(1, req.seq, 0, p.encode_hello_result(p.HelloInfo(2, 0, 1, 9, 4096)))
+                return p.encode_response(1, req.seq, 0, p.encode_hello_result(p.HelloInfo(3, 0, 1, 9, 4096)))
             return super()._handle(req)
 
     client, _ = make(OldDevice())
@@ -218,3 +218,63 @@ def test_disconnected_transport_raises_not_connected():
     mock.connected = False
     with pytest.raises(NotConnectedError):
         client.read_config()
+
+
+# ---------------------------------------------------------------- lock pattern
+
+LOCK = [0, 1, 2, p.SLOT_KNOB_CW]
+
+
+def test_locked_device_refuses_read_test_boot():
+    client, mock = make(MockDevice(storage=p.encode_blob(["secret"] + [""] * 8, LOCK)))
+    info = client.hello()
+    assert info.locked and not info.blocked and info.lock_flags & p.LOCK_FLAG_SET
+    for call in (client.read_config, lambda: client.test(0)):
+        with pytest.raises(DeviceStatusError) as e:
+            call()
+        assert e.value.status == p.Status.LOCKED
+    assert mock.typed == []
+
+    mock.enter_pattern(LOCK)
+    assert not client.hello().locked
+    cfg = client.read_config()
+    assert cfg.slots[0] == "secret" and cfg.lock == LOCK
+
+
+def test_wrong_patterns_block_until_power_cycle():
+    _, mock = make(MockDevice(storage=p.encode_blob([""] * 9, LOCK)))
+    for _ in range(5):
+        mock.enter_pattern([5, 5, 5, 5])
+    mock.enter_pattern(LOCK)
+    client, _ = make(mock)
+    assert client.hello().blocked
+    mock.power_cycle()
+    mock.enter_pattern(LOCK)
+    assert not client.hello().locked
+
+
+def test_write_while_locked_replaces_config():
+    client, mock = make(MockDevice(storage=p.encode_blob(["secret"] + [""] * 8, LOCK)))
+    client.hello()
+    client.write_config(["new"] + [""] * 8)          # no lock in the new config
+    assert not client.hello().locked
+    assert client.read_config().slots[0] == "new"
+
+
+def test_save_lock_keeps_open_device_open_until_replug():
+    client, mock = make()
+    client.hello()
+    client.write_config([""] * 9, lock=LOCK)
+    assert client.hello().lock_flags == p.LOCK_FLAG_SET
+    mock.power_cycle()
+    assert client.hello().locked
+
+
+def test_lock_needs_protocol_2():
+    client, mock = make(MockDevice(protocol=1, fw=(1, 0)))
+    info = client.hello()
+    assert not info.supports_lock and not info.locked
+    with pytest.raises(DeviceError) as e:
+        client.write_config([""] * 9, lock=LOCK)
+    assert "잠금" in str(e.value)
+    assert mock.commit_count == 0

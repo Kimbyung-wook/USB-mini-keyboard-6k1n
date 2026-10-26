@@ -150,3 +150,128 @@ def test_disconnected_device_handled(win):
     assert not win.read_from_device(confirm=False)
     assert not win.connected
     assert "연결 안 됨" in win.conn_label.text()
+
+
+# ---------------------------------------------------------------- lock pattern
+
+LOCK = [0, 1, 2, p.SLOT_KNOB_CW]
+
+
+def locked_window(qapp, slots=None, lock=LOCK):
+    mock = MockDevice(capacity=128, storage=p.encode_blob(slots or SAMPLE_SLOTS[:2] + [""] * 7, lock))
+    w = MainWindow(make_mock_connector(mock), auto_reconnect=False)
+    w.mock = mock
+    w.dialogs = []
+    w.ask = lambda t, m: (w.dialogs.append(("ask", t, m)), True)[1]
+    w.inform = lambda t, m: w.dialogs.append(("inform", t, m))
+    w.error = lambda t, m: w.dialogs.append(("error", t, m))
+    return w
+
+
+def test_lock_editor_builds_pattern(win):
+    win.connect_device()
+    ed = win.lock_editor
+    assert "없음" in ed.display.text()
+    for slot in (0, 3):
+        ed.input_buttons[slot].click()
+    assert win.lock == [0, 3] and win.has_unsaved()
+    assert "4단계 이상" in ed.status.text()
+    assert not win.save_btn.isEnabled()
+    ed.input_buttons[p.SLOT_KNOB_CW].click()
+    ed.input_buttons[p.SLOT_KNOB_PRESS].click()
+    assert ed.display.text() == "A → D → ↻ → ●"
+    assert win.save_btn.isEnabled() and "잠금 패턴 *" == ed.title()
+    for _ in range(10):
+        ed.input_buttons[1].click()
+    assert len(win.lock) == p.LOCK_MAX_STEPS
+    ed.back_btn.click()
+    assert len(win.lock) == p.LOCK_MAX_STEPS - 1
+    ed.clear_btn.click()
+    assert win.lock == [] and not win.has_unsaved()
+
+
+def test_lock_costs_capacity(win):
+    win.connect_device()
+    before = win.blob_size()
+    win.set_lock(LOCK)
+    assert win.blob_size() == before + 2 + len(LOCK)
+    chars = sum(len(s) for s in SAMPLE_SLOTS)
+    assert f"{chars}자 입력" in win.capacity_bar.format()   # the lock is not counted as text
+
+
+def test_save_lock_then_replug_locks(win):
+    win.connect_device()
+    win.set_lock(LOCK)
+    assert win.save_to_device()
+    assert win.mock.stored_config().lock == LOCK
+    assert "다시 꽂을 때부터" in win.dialogs[-1][2]
+    assert not win.device_locked and not win.has_unsaved()
+
+    win.mock.power_cycle()
+    win.disconnect_device()
+    win.connect_device()
+    assert win.device_locked
+    assert "잠김" in win.conn_label.text()
+    assert not win.read_btn.isEnabled() and not win.test_btn.isEnabled()
+
+
+def test_connect_locked_does_not_read_then_unlock_reads(qapp):
+    w = locked_window(qapp)
+    assert w.connect_device()
+    assert w.device_locked and w.slots == [""] * 9
+    assert not any(r.cmd == p.Cmd.READ for r in w.mock.requests)
+    assert "패턴을 입력" in w.conn_label.text()
+
+    w.mock.enter_pattern([5, 5, 5, 5])          # wrong
+    w._poll_device()
+    assert w.device_locked
+    w.mock.enter_pattern(LOCK)
+    w._poll_device()
+    assert not w.device_locked and "연결됨" in w.conn_label.text()
+    assert w.slots[:2] == SAMPLE_SLOTS[:2] and w.lock == LOCK
+    assert not w.has_unsaved()
+    w.close()
+
+
+def test_blocked_shown(qapp):
+    w = locked_window(qapp)
+    for _ in range(5):
+        w.mock.enter_pattern([5, 5, 5, 5])
+    w.connect_device()
+    assert "다시 꽂으세요" in w.conn_label.text()
+    w.close()
+
+
+def test_save_while_locked_warns_and_overwrites(qapp):
+    w = locked_window(qapp)
+    w.connect_device()
+    w.set_slot_text(0, "fresh")
+    assert w.save_to_device()
+    assert "모두 지우고" in [d for d in w.dialogs if d[0] == "ask"][-1][2]
+    assert w.mock.stored_config().slots[0] == "fresh"
+    assert not w.device_locked            # the new config has no pattern
+    w.close()
+
+
+def test_old_firmware_cannot_save_lock(qapp):
+    mock = MockDevice(capacity=128, fw=(1, 0), protocol=1)
+    w = MainWindow(make_mock_connector(mock), auto_reconnect=False)
+    w.dialogs = []
+    w.ask = lambda t, m: True
+    w.inform = w.error = lambda t, m: w.dialogs.append((t, m))
+    w.connect_device()
+    assert not w.lock_editor.isEnabled()
+    w.set_lock(LOCK)
+    assert not w.save_to_device(confirm=False)
+    assert "지원하지 않습니다" in w.dialogs[-1][1]
+    assert mock.commit_count == 0
+    w.baseline, w.lock_baseline = list(w.slots), list(w.lock)
+    w.close()
+
+
+def test_firmware_version_and_build_date_shown(qapp):
+    mock = MockDevice(capacity=128, fw=(1, 1, 0), build=(2026, 10, 26, 11, 40))
+    w = MainWindow(make_mock_connector(mock), auto_reconnect=False)
+    w.connect_device()
+    assert "펌웨어 v1.1.0 (빌드 2026-10-26 11:40)" in w.conn_label.text()
+    w.close()

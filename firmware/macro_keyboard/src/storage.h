@@ -15,6 +15,10 @@ uint8_t storage_read_byte(__data uint8_t addr);
 __xdata uint8_t *storage_slot_text(__data uint8_t slot);
 uint8_t storage_slot_len(__data uint8_t slot);
 
+// Lock pattern: number of steps (0 = no lock) and the input numbers
+uint8_t storage_lock_len(void);
+__xdata uint8_t *storage_lock_steps(void);
+
 // Staging for WRITE/COMMIT. Return a protocol status code.
 uint8_t storage_stage_write(__data uint16_t offset, __data uint8_t len,
                             __xdata uint8_t *data);

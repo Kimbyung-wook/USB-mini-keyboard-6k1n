@@ -1,6 +1,6 @@
-# macro_keyboard: 본 펌웨어 v1.0
+# macro_keyboard: 본 펌웨어 v1.1
 
-6키 + 노브 1개 CH552G 미니 키보드용 펌웨어입니다. 키와 노브 동작마다 저장된 문자열(매크로)을 HID 키보드 입력으로 출력하고, [gui](../../gui/) 설정 프로그램과 [PROTOCOL.md](../../docs/PROTOCOL.md) v1 규격으로 통신합니다.
+6키 + 노브 1개 CH552G 미니 키보드용 펌웨어입니다. 키와 노브 동작마다 저장된 문자열(매크로)을 HID 키보드 입력으로 출력하고, [gui](../../gui/) 설정 프로그램과 [PROTOCOL.md](../../docs/PROTOCOL.md) v2 규격으로 통신합니다.
 
 ## 기능
 
@@ -8,25 +8,41 @@
 |---|---|
 | USB 구성 | 인터페이스 0: HID 키보드, 인터페이스 1: 설정용 Vendor HID (64바이트) |
 | 슬롯 | 키 A~F, 노브 시계 방향/반시계 방향/누르기 (9개) |
-| 저장 | DataFlash 128바이트. 헤더와 슬롯 길이 정보 26바이트를 빼면 **9개 슬롯 합계 102자** |
+| 저장 | DataFlash 128바이트. 헤더와 슬롯 길이 정보 26바이트를 빼면 **9개 슬롯 합계 102자** (잠금 패턴을 쓰면 `2 + 단계 수`바이트만큼 줄어듦) |
 | 매크로 | `{ENTER}` `{TAB}` `{UP}` `{F5}` 등 키 이름, `{CTRL+C}` 같은 조합키, `{DELAY:n}`, `{{` `}}` |
 | Caps Lock | 켜져 있어도 영문 대소문자가 쓴 그대로 입력되도록 보정 |
 | 연속 입력 | 출력 중에 누른 키는 최대 8개까지 순서대로 대기 |
+| 잠금 (v1.1) | 잠금 패턴을 저장하면 꽂을 때마다 잠긴 상태로 시작. 키/노브로 패턴(4~8단계)을 입력해야 문자열이 출력됨 |
 
 ### LED (WS2812 1개)
 
 | 색 | 의미 |
 |---|---|
-| 파랑 | 대기 중 |
+| 빨강 | 잠김: 잠금 패턴을 입력해야 함 |
+| 빨강이 0.4초 꺼짐 | 패턴이 틀림 |
+| 빨강 깜빡임 | 5번 틀려서 입력을 막음. 다시 꽂아야 함 |
+| 파랑 | 대기 중 (잠금이 풀렸거나 잠금 패턴 없음) |
 | 초록 | 문자열 출력 중 |
 | 흰색 (0.3초) | 설정 저장 완료 |
-| 빨강 | 부트로더로 들어가는 중 |
+| 보라 | 부트로더로 들어가는 중 (v1.0은 빨강) |
 
 ### 부트로더 진입 (펌웨어 업데이트)
 
 - **키 D를 누른 채 USB 연결**: ROM 부트로더(P1.5)
 - **노브를 누른 채 USB 연결**: 펌웨어가 부트로더로 점프 (키 D 방법이 안 될 때의 예비 방법)
-- GUI의 BOOT 명령도 지원합니다(아직 GUI 화면에는 버튼이 없음).
+- GUI의 BOOT 명령도 지원합니다(아직 GUI 화면에는 버튼이 없음). 잠긴 동안에는 거부합니다.
+
+### 잠금
+
+1. GUI의 **잠금 패턴** 칸에서 키/노브 버튼을 순서대로 눌러 패턴을 만들고(4~8단계) **[장치에 저장]**합니다. 저장한 직후에는 풀린 상태가 유지되고, **다음에 꽂을 때부터** 잠깁니다.
+2. 키보드를 꽂으면 LED가 **빨강**이 됩니다. 이때 키와 노브는 아무것도 입력하지 않습니다.
+3. 패턴을 순서대로 입력하면 LED가 **파랑**이 되고 평소처럼 동작합니다. 패턴의 마지막 입력은 타이핑되지 않습니다.
+4. 틀리면 LED가 잠깐 꺼졌다가 빨강으로 돌아오고, 처음부터 다시 입력합니다. 입력 사이가 3초 넘게 비면 그때까지의 입력은 버려집니다.
+5. **5번 틀리면** 빨강으로 깜빡이며 입력을 받지 않습니다. 다시 꽂으면 다시 시도할 수 있습니다.
+
+잠긴 동안에는 GUI에서 읽기와 테스트 입력이 안 됩니다. 패턴을 잊었으면 GUI에서 새 설정을 **[장치에 저장]**하면 됩니다. 이때 기존 문자열과 패턴은 모두 지워집니다.
+
+이 잠금은 주변 사람이 키를 눌러 보는 것을 막는 정도입니다. 펌웨어를 새로 구워 DataFlash를 읽는 것까지는 막지 못하니 비밀번호 같은 민감한 문자열은 저장하지 마세요.
 
 ## 빌드
 
@@ -39,17 +55,31 @@ Arduino IDE + CH55xDuino 0.0.26 (Windows는 [TROUBLESHOOTING 1-1](../../docs/TRO
 | USB Settings | **USER CODE w/ 266B USB ram** ⚠️ test_pinmap(148B)과 다릅니다 |
 | Bootloader pin | **P1.5 pull-down** |
 
-**Sketch → Export Compiled Binary**를 누르면 `build\CH55xDuino.mcs51.ch552\macro_keyboard.ino.hex`가 생깁니다.
+**빌드 스크립트 (권장)**: 저장소 폴더에서 실행하면 위 보드 설정으로 빌드하고 **빌드한 시각**을 펌웨어에 넣습니다. 결과는 `firmware\macro_keyboard\build\macro_keyboard.ino.hex`입니다.
 
-확인 결과(2026-10-26): 프로그램 9827바이트(68%), 전역 변수 445바이트(58%).
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
+```
+
+**Arduino IDE**: **Sketch → Export Compiled Binary**를 누르면 `build\CH55xDuino.mcs51.ch552\macro_keyboard.ino.hex`가 생깁니다. 이렇게 빌드하면 빌드 날짜가 들어가지 않습니다(GUI에 `빌드 날짜 없음`).
+
+### 버전과 빌드 날짜
+
+- **버전**은 `src/config.h`의 `FW_MAJOR`, `FW_MINOR`, `FW_PATCH`를 직접 고칩니다(지금 `1.1.0`). USB 장치 정보(bcdDevice)에도 같은 값이 들어갑니다.
+- **빌드 날짜**는 `tools/build_fw.ps1`이 빌드 순간의 시각을 컴파일 옵션(`-DFW_BUILD_YEAR=2026` 등)으로 넘깁니다. 컴파일러의 `__DATE__`를 쓰지 않는 이유: Arduino는 바뀌지 않은 파일을 다시 컴파일하지 않아서 예전 날짜가 남습니다.
+- GUI 연결 막대에 `펌웨어 v1.1.0 (빌드 2026-10-26 11:40)`처럼 표시됩니다. 펌웨어 1.0은 `펌웨어 v1.0`으로만 보입니다.
+
+확인 결과(2026-10-26, v1.1.0): 프로그램 10873바이트(75%), 전역 변수 490바이트(64%).
 
 ## 업로드
 
-저장소 폴더에서 실행하고, **키 D를 누른 채** 키보드를 연결합니다.
+저장소 폴더에서 실행하고, **키 D를 누른 채** 키보드를 연결합니다. `build_fw.ps1`로 빌드했으면:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_keyboard\build\CH55xDuino.mcs51.ch552\macro_keyboard.ino.hex
+powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_keyboard\build\macro_keyboard.ino.hex
 ```
+
+Arduino IDE로 빌드했으면 `-Hex firmware\macro_keyboard\build\CH55xDuino.mcs51.ch552\macro_keyboard.ino.hex`입니다.
 
 업로드 후 LED가 **파랑**으로 켜지면 펌웨어가 실행 중인 것입니다. 처음에는 DataFlash에 이전 제조사 설정이 남아 있어도 형식이 맞지 않으므로 **모든 슬롯이 비어 있는 상태**로 시작합니다.
 
@@ -58,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_key
 ### 1. 연결 확인
 
 1. GUI를 실행합니다: `gui\.venv\Scripts\python -m gui`
-2. 상단에 `● 연결됨 · 펌웨어 v1.0 · 용량 128바이트`가 보이면 설정 통신이 되는 것입니다.
+2. 상단에 `● 연결됨 · 펌웨어 v1.1.0 (빌드 …) · 용량 128바이트`가 보이면 설정 통신이 되는 것입니다. 빌드 날짜가 방금 빌드한 시각인지도 확인하세요(새 펌웨어가 올라갔다는 표시).
 3. 처음에는 "설정 없음"으로 빈 슬롯 9개가 표시됩니다.
 
 ### 2. 테스트 문자열 넣기
@@ -90,7 +120,17 @@ powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_key
 
 GUI의 **[테스트 입력]**으로 키를 누르지 않고 선택한 슬롯을 입력해 볼 수도 있습니다(3초 카운트다운 뒤 포커스된 창에 입력됨).
 
-### 4. 용량 확인
+### 4. 잠금 확인
+
+1. GUI의 잠금 패턴에 `A → B → C → ↻`(키 A, B, C, 노브 시계 방향 한 칸)를 넣고 저장합니다(전체 117 / 128바이트). LED는 파랑 그대로입니다.
+2. USB를 뺐다가 다시 꽂으면 LED가 **빨강**이고, GUI 상단에 `🔒 잠김 … 키보드에서 잠금 패턴을 입력하세요`가 보입니다.
+3. 메모장에서 키 A를 눌러도 아무것도 입력되지 않는지 확인합니다.
+4. `A, B, D, ↻`처럼 틀리게 입력하면 LED가 잠깐 꺼졌다가 빨강으로 돌아오는지 확인합니다.
+5. `A, B, C, ↻`를 입력하면 LED가 **파랑**이 되고, 2초 안에 GUI가 `● 연결됨`으로 바뀌며 설정을 읽어 오는지 확인합니다.
+6. 다시 꽂은 뒤 5번 틀리게 입력하면 빨강으로 깜빡이고, 맞는 패턴도 받지 않는지 확인합니다.
+7. 확인이 끝나면 GUI에서 잠금 패턴을 **모두 지우기** 하고 저장하면 잠금이 꺼집니다.
+
+### 5. 용량 확인
 
 GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바이트)`가 표시됩니다. 128바이트를 넘으면 빨간색으로 바뀌고 저장 버튼이 꺼집니다.
 
@@ -102,6 +142,7 @@ GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바
 | GUI가 "연결 안 됨" | 장치 관리자의 HID 장치에 `Mini Macro Kbd`가 두 개(키보드, 공급업체 정의 장치) 있는지 확인. 다른 GUI 창이 장치를 잡고 있지 않은지 확인 |
 | 영문 대신 한글이 입력됨 | 한/영 키로 영문 모드로 전환 ([TROUBLESHOOTING 3-1](../../docs/TROUBLESHOOTING.md)) |
 | 다시 업로드해야 함 | 키 D 또는 노브를 누른 채 연결 |
+| 잠금 패턴을 잊음 | GUI에서 새 설정을 저장 (기존 문자열과 패턴은 지워짐) |
 
 더 자세한 내용은 [docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md)를 보세요.
 
@@ -110,13 +151,14 @@ GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바
 | 파일 | 내용 |
 |---|---|
 | `macro_keyboard.ino` | 키/노브 입력, LED, 부트로더 점프, 메인 루프 |
-| `src/config.h` | 핀, 버전, 용량 |
+| `src/config.h` | 핀, 버전, 용량, 잠금 설정값 |
+| `src/lock.c/.h` | 잠금 상태, 패턴 입력 판정, 틀린 횟수 |
 | `src/protocol.c/.h` | Vendor HID 명령 처리 (HELLO/READ/WRITE/COMMIT/TEST/BOOT) |
 | `src/storage.c/.h` | DataFlash 블롭 저장, CRC 검사, 슬롯 찾기 |
 | `src/macro.c/.h` | 매크로 해석과 비동기 출력 (키 누름/뗌, DELAY) |
 | `src/usb/` | USB 디스크립터, 요청 처리, 엔드포인트 (CH55xDuino qmkCompatibleKeyboard 예제 기반, LGPL-2.1) |
 
-`firmware/host_test/run.py`로 `storage.c`와 `macro.c`를 PC(gcc)에서 검사할 수 있습니다. GUI의 인코더로 만든 블롭을 저장하고, 각 슬롯이 보내는 HID 키 코드를 확인합니다.
+`firmware/host_test/run.py`로 `storage.c`, `macro.c`, `lock.c`를 PC(gcc)에서 검사할 수 있습니다. GUI의 인코더로 만든 블롭을 저장하고, 각 슬롯이 보내는 HID 키 코드와 잠금 패턴 판정을 확인합니다.
 
 ```powershell
 gui\.venv\Scripts\python firmware\host_test\run.py

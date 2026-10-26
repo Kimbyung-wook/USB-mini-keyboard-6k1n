@@ -3,10 +3,13 @@
 
   - Interface 0: HID keyboard. Each key/knob action types the text of its
     slot (macro syntax in docs/PROTOCOL.md).
-  - Interface 1: vendor HID for the config GUI (gui/), protocol v1.
+  - Interface 1: vendor HID for the config GUI (gui/), protocol v2.
   - Config is stored in the 128-byte DataFlash.
-  - LED (WS2812 on P3.4): blue idle, green while typing,
-    white flash after saving, red before jumping to the bootloader.
+  - Lock: with a lock pattern stored, it starts locked (red LED) and types
+    nothing until the pattern is entered on the keys/knob (then blue).
+  - LED (WS2812 on P3.4): red while locked (dark flash on a wrong try,
+    blinking after too many), blue idle, green while typing,
+    white flash after saving, purple before jumping to the bootloader.
   - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
     plugging in, or send BOOT from the GUI.
 
@@ -27,6 +30,7 @@
 #include "src/config.h"
 #include "src/protocol.h"
 #include "src/storage.h"
+#include "src/lock.h"
 #include "src/macro.h"
 #include "src/usb/hid.h"
 
@@ -53,7 +57,9 @@ int8_t encCount = 0;
 #define COLOR_TYPING 2
 #define COLOR_SAVED 3
 #define COLOR_BOOT 4
+#define COLOR_LOCKED 5
 #define SAVED_FLASH_MS 300
+#define BLOCKED_BLINK_SHIFT 9 // blink period 2 x 512 ms
 #define LED_REFRESH_MS 200
 
 // Only one LED is visible, but which position in the chain it has is not
@@ -87,6 +93,8 @@ void showColor(uint8_t color) {
   } else if (color == COLOR_SAVED) {
     fillLeds(40, 40, 40);
   } else if (color == COLOR_BOOT) {
+    fillLeds(40, 0, 40);
+  } else if (color == COLOR_LOCKED) {
     fillLeds(40, 0, 0);
   } else {
     fillLeds(0, 0, 0);
@@ -103,7 +111,14 @@ void updateLed() {
     }
     savedFlash = 0;
   }
-  showColor(macro_busy() ? COLOR_TYPING : COLOR_IDLE);
+  if (lock_state() == LOCK_BLOCKED) {
+    showColor(((uint16_t)millis() >> BLOCKED_BLINK_SHIFT) & 1 ? COLOR_OFF
+                                                               : COLOR_LOCKED);
+  } else if (lock_state() == LOCK_LOCKED) {
+    showColor(lock_wrong_flash() ? COLOR_OFF : COLOR_LOCKED);
+  } else {
+    showColor(macro_busy() ? COLOR_TYPING : COLOR_IDLE);
+  }
 }
 
 void jumpToBootloader() {
@@ -118,6 +133,15 @@ void jumpToBootloader() {
 
   while (1)
     ;
+}
+
+// A key or knob action: typed when open, otherwise part of the lock pattern
+void onInput(uint8_t slot) {
+  if (lock_state() == LOCK_OPEN) {
+    macro_enqueue(slot);
+  } else {
+    lock_input(slot);
+  }
 }
 
 uint8_t readEncoder() {
@@ -137,7 +161,7 @@ void scanKeys() {
                (uint16_t)(now - keyChangedAt[i]) >= DEBOUNCE_MS) {
       keyStable[i] = pressed;
       if (pressed) {
-        macro_enqueue(keySlots[i]);
+        onInput(keySlots[i]);
       }
     }
   }
@@ -154,7 +178,7 @@ void scanEncoder() {
 
   // One action per detent, when both lines are back at rest (high)
   if (curr == 3 && encCount != 0) {
-    macro_enqueue(encCount < 0 ? SLOT_KNOB_CW : SLOT_KNOB_CCW);
+    onInput(encCount < 0 ? SLOT_KNOB_CW : SLOT_KNOB_CCW);
     encCount = 0;
   }
 }
@@ -178,9 +202,10 @@ void setup() {
   }
 
   storage_init();
+  lock_init();
   encPrev = readEncoder();
   USBInit();
-  showColor(COLOR_IDLE);
+  updateLed();
 }
 
 void loop() {

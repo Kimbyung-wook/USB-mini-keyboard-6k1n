@@ -1,13 +1,20 @@
-// Host test driver for firmware/macro_keyboard/src/{storage,macro}.c.
-// Usage: host_test <blob.bin> [capslock]
+// Host test driver for firmware/macro_keyboard/src/{storage,macro,lock}.c.
+// Usage: host_test <blob.bin> [caps]
+//        host_test <blob.bin> lock <inputs>...
+//        host_test <blob.bin> tail <blob2.bin>
 // Stages and commits the blob in 56-byte chunks, then types every slot and
 // prints the key reports, e.g. "slot 0: 02:0b 00:08 D50 ...".
+// "lock": each argument is a string of input numbers (0-8) entered on the
+// keyboard, a leading "t" first waits out the input timeout; prints the lock
+// state after each. "tail": commits blob2 over the blob and counts the
+// DataFlash bytes past blob2 that are not blank.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "Arduino.h"
 #include "../macro_keyboard/src/config.h"
+#include "../macro_keyboard/src/lock.h"
 #include "../macro_keyboard/src/macro.h"
 #include "../macro_keyboard/src/protocol.h"
 #include "../macro_keyboard/src/storage.h"
@@ -42,24 +49,21 @@ uint8_t kb_send(uint8_t modifiers, uint8_t keycode) {
   return 1;
 }
 
-int main(int argc, char **argv) {
-  static uint8_t blob[512];
-  FILE *f;
+static size_t readFile(const char *path, uint8_t *buf, size_t size) {
+  FILE *f = fopen(path, "rb");
   size_t n;
-  uint8_t st = ST_OK;
-
-  if (argc < 2 || !(f = fopen(argv[1], "rb"))) {
-    fprintf(stderr, "usage: host_test blob.bin [capslock]\n");
-    return 2;
+  if (!f) {
+    fprintf(stderr, "cannot open %s\n", path);
+    exit(2);
   }
-  n = fread(blob, 1, sizeof(blob), f);
+  n = fread(buf, 1, size, f);
   fclose(f);
-  if (argc > 2) keyboardLedStatus = 0x02;
+  return n;
+}
 
-  memset(eeprom, 0xFF, sizeof(eeprom)); // blank DataFlash
-  storage_init();
-  printf("blank slot0 len %u\n", storage_slot_len(0));
-
+// WRITE in 56-byte chunks, then COMMIT; prints both statuses
+static uint8_t writeBlob(uint8_t *blob, size_t n) {
+  uint8_t st = ST_OK;
   for (size_t off = 0; off < n && st == ST_OK; off += PROTO_MAX_CHUNK) {
     uint8_t len = (uint8_t)((n - off) > PROTO_MAX_CHUNK ? PROTO_MAX_CHUNK : n - off);
     st = storage_stage_write((uint16_t)off, len, blob + off);
@@ -69,10 +73,60 @@ int main(int argc, char **argv) {
     st = storage_commit((uint16_t)n, blob[6] | (blob[7] << 8));
     printf("commit status %u\n", st);
   }
-  if (st != ST_OK) return 0;
+  return st;
+}
+
+static void runLock(int count, char **inputs) {
+  static const char *names[] = {"open", "locked", "blocked"};
+  lock_init();
+  printf("lock %s flags %u\n", names[lock_state()], lock_flags());
+  for (int i = 0; i < count; i++) {
+    const char *s = inputs[i];
+    if (*s == 't') {
+      now += LOCK_INPUT_TIMEOUT_MS;
+      s++;
+    }
+    for (; *s; s++) {
+      now += 100;
+      lock_input((uint8_t)(*s - '0'));
+    }
+    printf("lock %s flags %u\n", names[lock_state()], lock_flags());
+  }
+}
+
+int main(int argc, char **argv) {
+  static uint8_t blob[512];
+  size_t n;
+
+  if (argc < 2) {
+    fprintf(stderr, "usage: host_test blob.bin [caps | lock <inputs>... | tail blob2.bin]\n");
+    return 2;
+  }
+  n = readFile(argv[1], blob, sizeof(blob));
+  if (argc > 2 && !strcmp(argv[2], "caps")) keyboardLedStatus = 0x02;
+
+  memset(eeprom, 0xFF, sizeof(eeprom)); // blank DataFlash
+  storage_init();
+  printf("blank slot0 len %u\n", storage_slot_len(0));
+
+  if (writeBlob(blob, n) != ST_OK) return 0;
 
   // Reload from "DataFlash" as after a power cycle
   storage_init();
+
+  if (argc > 2 && !strcmp(argv[2], "lock")) {
+    runLock(argc - 3, argv + 3);
+    return 0;
+  }
+  if (argc > 3 && !strcmp(argv[2], "tail")) {
+    static uint8_t blob2[512];
+    size_t n2 = readFile(argv[3], blob2, sizeof(blob2));
+    int dirty = 0;
+    writeBlob(blob2, n2);
+    for (size_t i = n2; i < sizeof(eeprom); i++) dirty += eeprom[i] != 0xFF;
+    printf("tail dirty %d\n", dirty);
+    return 0;
+  }
 
   for (uint8_t slot = 0; slot < SLOT_COUNT; slot++) {
     printf("slot %u:", slot);

@@ -1,10 +1,10 @@
-"""Reusable widgets: device picture (slot selector) and the macro editor."""
+"""Reusable widgets: device picture (slot selector), macro editor, lock pattern editor."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
+    QButtonGroup, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMenu,
     QPlainTextEdit, QPushButton, QSizePolicy, QTextEdit, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -215,3 +215,104 @@ class MacroEditor(QWidget):
                 lines.append(f"… 외 {len(result.errors) - 5}개 오류")
             self.status.setStyleSheet("color: #c62828;")
             self.status.setText("\n".join(lines))
+
+
+LOCK_HELP = (
+    "키보드를 꽂으면 LED가 빨간색으로 잠기고, 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
+    "잠긴 동안에는 아무것도 입력되지 않고 GUI에서 읽기·테스트 입력도 할 수 없습니다. "
+    "5번 틀리면 키보드를 다시 꽂아야 합니다. 비워 두면 잠금을 쓰지 않습니다."
+)
+
+
+class LockPatternEditor(QGroupBox):
+    """Builds the lock pattern from the nine key/knob inputs."""
+
+    patternChanged = Signal(list)
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("잠금 패턴", parent)
+        self.steps: list[int] = []
+
+        self.display = QLabel()
+        self.display.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.status = QLabel()
+
+        inputs = QHBoxLayout()
+        inputs.setSpacing(4)
+        inputs.addWidget(QLabel("추가:"))
+        self.input_buttons: list[QToolButton] = []
+        for slot in range(p.SLOT_COUNT):
+            b = QToolButton()
+            b.setText(p.LOCK_STEP_NAMES[slot])
+            b.setToolTip(p.SLOT_LABELS_KO[slot])
+            b.setMinimumWidth(32)
+            b.clicked.connect(lambda _=False, s=slot: self.add_step(s))
+            inputs.addWidget(b)
+            self.input_buttons.append(b)
+        self.back_btn = QToolButton()
+        self.back_btn.setText("⌫ 한 칸 지우기")
+        self.back_btn.clicked.connect(self.remove_last)
+        self.clear_btn = QToolButton()
+        self.clear_btn.setText("모두 지우기")
+        self.clear_btn.clicked.connect(lambda: self._set(self.steps[:0]))
+        inputs.addSpacing(8)
+        inputs.addWidget(self.back_btn)
+        inputs.addWidget(self.clear_btn)
+        inputs.addStretch(1)
+
+        top = QHBoxLayout()
+        top.addWidget(self.display)
+        top.addStretch(1)
+        top.addWidget(self.status)
+
+        help_label = QLabel(LOCK_HELP)
+        help_label.setWordWrap(True)
+        help_label.setStyleSheet("color: palette(placeholder-text); font-size: 11px;")
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(top)
+        lay.addLayout(inputs)
+        lay.addWidget(help_label)
+        self._refresh()
+
+    def pattern(self) -> list[int]:
+        return list(self.steps)
+
+    def set_pattern(self, steps: list[int]) -> None:
+        """Show a pattern without emitting patternChanged."""
+        self.steps = list(steps)
+        self._refresh()
+
+    def set_modified(self, modified: bool) -> None:
+        self.setTitle("잠금 패턴 *" if modified else "잠금 패턴")
+
+    def add_step(self, slot: int) -> None:
+        if len(self.steps) < p.LOCK_MAX_STEPS:
+            self._set(self.steps + [slot])
+
+    def remove_last(self) -> None:
+        self._set(self.steps[:-1])
+
+    def _set(self, steps: list[int]) -> None:
+        self.steps = steps
+        self._refresh()
+        self.patternChanged.emit(self.pattern())
+
+    def _refresh(self) -> None:
+        n = len(self.steps)
+        self.display.setText(p.lock_text(self.steps) if n else "(없음 · 잠금 안 씀)")
+        err = p.lock_error(self.steps)
+        if err:
+            self.status.setStyleSheet("color: #c62828;")
+            self.status.setText(f"{n}단계 · {p.LOCK_MIN_STEPS}단계 이상 필요")
+        elif n:
+            self.status.setStyleSheet("color: #2e7d32;")
+            self.status.setText(f"✔ {n}단계 · {2 + n}바이트 사용")
+        else:
+            self.status.setStyleSheet("")
+            self.status.setText(f"{p.LOCK_MIN_STEPS}~{p.LOCK_MAX_STEPS}단계")
+        full = n >= p.LOCK_MAX_STEPS
+        for b in self.input_buttons:
+            b.setEnabled(not full)
+        self.back_btn.setEnabled(n > 0)
+        self.clear_btn.setEnabled(n > 0)

@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
 
 from . import backup, macro
 from . import protocol as p
-from .device import DeviceClient, DeviceError, NotConnectedError
+from .device import DeviceClient, DeviceError, DeviceStatusError, NotConnectedError
 from .transport import HidTransport, MockDevice, Transport, TransportError
 from .version import VERSION, version_text
-from .widgets import DeviceView, MacroEditor
+from .widgets import DeviceView, LockPatternEditor, MacroEditor
 
 APP_TITLE = "매크로 키보드 설정 (6키 + 노브)"
 DEFAULT_CAPACITY = 128  # firmware v1.0 stores the blob in the 128-byte DataFlash
@@ -37,12 +37,14 @@ class MainWindow(QMainWindow):
                  mock_label: str = ""):
         super().__init__()
         self.setWindowTitle(f"{APP_TITLE} v{VERSION}" + (f" — {mock_label}" if mock_label else ""))
-        self.resize(900, 680)
+        self.resize(900, 780)
 
         self._connect_fn = connect_fn
         self.client: DeviceClient | None = None
         self.slots: list[str] = [""] * p.SLOT_COUNT
         self.baseline: list[str] = [""] * p.SLOT_COUNT   # what the device holds
+        self.lock: list[int] = []
+        self.lock_baseline: list[int] = []
         self.current = 0
         self._countdown = 0
 
@@ -89,6 +91,11 @@ class MainWindow(QMainWindow):
         self.device_view.slotSelected.connect(self.select_slot)
         dev_lay.addWidget(self.device_view)
         root.addWidget(dev_box)
+
+        # Lock pattern
+        self.lock_editor = LockPatternEditor()
+        self.lock_editor.patternChanged.connect(self.set_lock)
+        root.addWidget(self.lock_editor)
 
         # Editor
         self.editor = MacroEditor()
@@ -154,17 +161,24 @@ class MainWindow(QMainWindow):
         return self.client is not None and self.client.info is not None
 
     @property
+    def device_locked(self) -> bool:
+        return self.connected and self.client.info.locked
+
+    @property
     def capacity(self) -> int:
         return self.client.info.capacity if self.connected else DEFAULT_CAPACITY
 
     def is_modified(self, slot: int) -> bool:
         return self.slots[slot] != self.baseline[slot]
 
+    def lock_modified(self) -> bool:
+        return self.lock != self.lock_baseline
+
     def has_unsaved(self) -> bool:
-        return any(self.is_modified(i) for i in range(p.SLOT_COUNT))
+        return self.lock_modified() or any(self.is_modified(i) for i in range(p.SLOT_COUNT))
 
     def blob_size(self) -> int:
-        return p.blob_size(self.slots)
+        return p.blob_size(self.slots, self.lock)
 
     def invalid_slots(self) -> list[int]:
         return [i for i, s in enumerate(self.slots) if not macro.parse(s).ok]
@@ -172,6 +186,8 @@ class MainWindow(QMainWindow):
     def _refresh_all(self) -> None:
         for i in range(p.SLOT_COUNT):
             self._refresh_slot(i)
+        self.lock_editor.set_pattern(self.lock)
+        self.lock_editor.set_modified(self.lock_modified())
         self._refresh_capacity()
         self._refresh_connection()
 
@@ -183,7 +199,7 @@ class MainWindow(QMainWindow):
         used, cap = self.blob_size(), self.capacity
         # Every stored character costs one byte (macro text like {ENTER} counts as typed);
         # the rest of the blob is the fixed header and slot lengths.
-        chars = used - p.blob_size([""] * p.SLOT_COUNT)
+        chars = p.blob_size(self.slots) - p.blob_size([""] * p.SLOT_COUNT)
         self.capacity_bar.setMaximum(cap)
         self.capacity_bar.setValue(min(used, cap))
         suffix = "" if self.connected else " (장치 미연결, 기본값 기준)"
@@ -197,16 +213,25 @@ class MainWindow(QMainWindow):
             self.capacity_bar.setStyleSheet("")
         self.capacity_bar.setToolTip(
             "9개 슬롯 전체의 글자 수입니다. {ENTER} 같은 매크로 표기도 쓴 글자 수만큼 차지합니다.\n"
-            f"헤더와 슬롯 길이 정보로 {used - chars}바이트가 고정으로 쓰입니다.")
+            f"헤더와 슬롯 길이 정보로 {p.blob_size([''] * p.SLOT_COUNT)}바이트가 고정으로 쓰입니다."
+            + (f"\n잠금 패턴이 {used - chars - p.blob_size([''] * p.SLOT_COUNT)}바이트를 씁니다."
+               if self.lock else ""))
         self._refresh_buttons()
 
     def _refresh_connection(self) -> None:
         if self.connected:
             info = self.client.info
             src = self.client.transport.description if self.client.transport else ""
-            self.conn_label.setText(
-                f"● 연결됨 ({src}) · 펌웨어 v{info.fw_version} · 용량 {info.capacity}바이트")
-            self.conn_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
+            head = f"({src}) · {info.fw_text} · 용량 {info.capacity}바이트"
+            if info.blocked:
+                self.conn_label.setText(f"🔒 잠김 {head} — 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요")
+                self.conn_label.setStyleSheet("font-weight: bold; color: #c62828;")
+            elif info.locked:
+                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 잠금 패턴을 입력하세요")
+                self.conn_label.setStyleSheet("font-weight: bold; color: #e65100;")
+            else:
+                self.conn_label.setText(f"● 연결됨 {head}")
+                self.conn_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
             self.connect_btn.setText("연결 끊기")
         else:
             self.conn_label.setText("○ 연결 안 됨")
@@ -216,10 +241,16 @@ class MainWindow(QMainWindow):
 
     def _refresh_buttons(self) -> None:
         on = self.connected
-        self.read_btn.setEnabled(on)
-        self.save_btn.setEnabled(on and self.blob_size() <= self.capacity)
-        self.test_btn.setEnabled(on and self._countdown == 0)
+        unlocked = on and not self.device_locked
+        self.read_btn.setEnabled(unlocked)
+        self.save_btn.setEnabled(on and self.blob_size() <= self.capacity
+                                 and p.lock_error(self.lock) is None)
+        self.test_btn.setEnabled(unlocked and self._countdown == 0)
         self.refresh_btn.setEnabled(True)
+        supported = not on or self.client.info.supports_lock
+        self.lock_editor.setEnabled(supported or bool(self.lock))  # still lets a pattern be cleared
+        self.lock_editor.setToolTip("" if supported else
+                                    "이 펌웨어는 잠금을 지원하지 않습니다 (펌웨어 v1.1 이상 필요)")
 
     def _update_title(self) -> None:
         base = self.windowTitle().lstrip("* ")
@@ -242,10 +273,22 @@ class MainWindow(QMainWindow):
         self._refresh_capacity()
         self._update_title()
 
-    def _load_slots(self, slots: list[str], *, from_device: bool) -> None:
+    def set_lock(self, steps: list[int]) -> None:
+        self.lock = list(steps)
+        self.lock_editor.set_pattern(self.lock)
+        self.lock_editor.set_modified(self.lock_modified())
+        self._refresh_capacity()
+        self._update_title()
+
+    def _load_slots(self, slots: list[str], lock: list[int] | None = None, *,
+                    from_device: bool) -> None:
+        """Load slot texts; lock None keeps the current pattern (JSON has none)."""
         self.slots = list(slots)
+        if lock is not None:
+            self.lock = list(lock)
         if from_device:
             self.baseline = list(slots)
+            self.lock_baseline = list(self.lock)
         self.editor.set_slot(self.current, self.slots[self.current])
         self._refresh_all()
         self._update_title()
@@ -275,7 +318,10 @@ class MainWindow(QMainWindow):
         self.client = client
         self._refresh_all()
         self.statusBar().showMessage("장치에 연결했습니다", 3000)
-        if not self.has_unsaved():
+        if client.info.locked:
+            self.statusBar().showMessage(
+                "장치가 잠겨 있습니다. 키보드에서 잠금 패턴을 입력하면 설정을 읽어옵니다", 8000)
+        elif not self.has_unsaved():
             self.read_from_device(confirm=False)
         else:
             self.statusBar().showMessage("편집 중인 내용이 있어 자동으로 읽지 않았습니다", 5000)
@@ -292,18 +338,34 @@ class MainWindow(QMainWindow):
             self.connect_device()
             return
         try:
-            self.client.hello()
+            self.check_lock()
             self.statusBar().showMessage("장치 상태를 확인했습니다", 3000)
         except DeviceError as e:
             self._handle_device_error("새로고침 실패", e)
         self._refresh_all()
 
+    def check_lock(self) -> None:
+        """HELLO again; when the keyboard was just unlocked, read its config."""
+        was_locked = self.device_locked
+        self.client.hello()
+        self._refresh_connection()
+        if was_locked and not self.device_locked:
+            self.statusBar().showMessage("잠금이 풀렸습니다", 3000)
+            if not self.has_unsaved():
+                self.read_from_device(confirm=False)
+
     def _poll_device(self) -> None:
-        """Auto-reconnect when a keyboard appears; notice when it is unplugged."""
+        """Auto-reconnect when a keyboard appears; notice when it is unplugged
+        or unlocked."""
         if self._countdown:
             return
         if not self.connected:
             self.connect_device(quiet=True)
+        elif self.device_locked:
+            try:
+                self.check_lock()
+            except DeviceError:
+                self.disconnect_device()
         elif isinstance(self.client.transport, HidTransport):
             try:
                 present = bool(HidTransport.find_paths())
@@ -316,6 +378,12 @@ class MainWindow(QMainWindow):
     def _handle_device_error(self, title: str, e: Exception) -> None:
         if isinstance(e, NotConnectedError):
             self.disconnect_device()
+        elif isinstance(e, DeviceStatusError) and e.status == p.Status.LOCKED:
+            try:
+                self.client.hello()   # show the lock in the connection bar
+            except DeviceError:
+                pass
+            self._refresh_connection()
         self.error(title, str(e))
 
     # ------------------------------------------------------------ device actions
@@ -334,7 +402,7 @@ class MainWindow(QMainWindow):
             self._handle_device_error("읽기 실패", e)
             return False
         QApplication.restoreOverrideCursor()
-        self._load_slots(cfg.slots, from_device=True)
+        self._load_slots(cfg.slots, cfg.lock, from_device=True)
         if cfg.valid:
             self.statusBar().showMessage("장치에서 설정을 읽었습니다", 3000)
         else:
@@ -351,26 +419,43 @@ class MainWindow(QMainWindow):
             self.error("저장할 수 없음", f"문법 오류가 있는 슬롯이 있습니다: {names}\n오류를 고친 뒤 다시 저장하세요.")
             self.select_slot(bad[0])
             return False
+        lock_err = p.lock_error(self.lock)
+        if lock_err:
+            self.error("저장할 수 없음", f"{lock_err}.\n패턴을 고치거나 모두 지운 뒤 다시 저장하세요.")
+            return False
         size, cap = self.blob_size(), self.capacity
         if size > cap:
             self.error("저장할 수 없음", f"설정 크기({size}바이트)가 장치 용량({cap}바이트)을 넘습니다.")
             return False
-        if confirm and not self.ask("장치에 저장", f"9개 슬롯 전체({size}바이트)를 장치에 저장할까요?"):
+        was_locked = self.device_locked
+        if was_locked:
+            question = ("장치가 잠겨 있어 저장된 설정을 읽지 못했습니다.\n"
+                        "저장하면 장치의 기존 문자열과 잠금 패턴을 모두 지우고 지금 화면의 내용으로 바꿉니다.\n\n"
+                        f"9개 슬롯 전체({size}바이트)를 저장할까요?")
+        else:
+            question = f"9개 슬롯 전체({size}바이트)를 장치에 저장할까요?"
+        lock_note = f"\n잠금 패턴: {p.lock_text(self.lock)}" if self.lock else "\n잠금 패턴: 없음"
+        if confirm and not self.ask("장치에 저장", question + lock_note):
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.client.write_config(self.slots)
+            self.client.write_config(self.slots, lock=self.lock)
+            self.client.hello()   # lock flags may have changed
         except DeviceError as e:
             QApplication.restoreOverrideCursor()
             self._handle_device_error("저장 실패", e)
             return False
         QApplication.restoreOverrideCursor()
         self.baseline = list(self.slots)
+        self.lock_baseline = list(self.lock)
         self._refresh_all()
         self._update_title()
         self.statusBar().showMessage(f"장치에 저장했습니다 ({size}바이트)", 5000)
         if confirm:
-            self.inform("저장 완료", f"장치에 저장했습니다 ({size}바이트).")
+            msg = f"장치에 저장했습니다 ({size}바이트)."
+            if self.lock and not self.device_locked:
+                msg += "\n잠금 패턴은 키보드를 다시 꽂을 때부터 적용됩니다."
+            self.inform("저장 완료", msg)
         return True
 
     def start_test(self, confirm: bool = True) -> bool:

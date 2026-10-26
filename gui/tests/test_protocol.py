@@ -129,3 +129,59 @@ def test_oversized_packet_rejected():
 def test_status_messages_are_korean():
     assert "용량" in p.status_message(p.Status.TOO_BIG)
     assert "알 수 없는" in p.status_message(99)
+
+
+def test_blob_with_lock_round_trip():
+    slots = ["a"] * 9
+    lock = [0, 5, p.SLOT_KNOB_CW, p.SLOT_KNOB_PRESS]
+    blob = p.encode_blob(slots, lock)
+    assert blob[3] == 10                       # the lock is a 10th slot
+    assert blob[-6:] == bytes([4, 0, 0, 5, 6, 8])
+    assert len(blob) == p.blob_size(slots, lock) == p.blob_size(slots) + 6
+    cfg = p.decode_blob(blob)
+    assert cfg.valid and cfg.slots == slots and cfg.lock == lock
+
+
+def test_blob_without_lock_unchanged():
+    assert p.encode_blob([""] * 9, []) == p.encode_blob([""] * 9)
+    assert p.decode_blob(p.encode_blob([""] * 9)).lock == []
+
+
+@pytest.mark.parametrize("lock", [[0, 1, 2], [0] * 9, [0, 1, 2, 9]])
+def test_invalid_lock_rejected(lock):
+    assert p.lock_error(lock)
+    with pytest.raises(p.BlobError):
+        p.encode_blob([""] * 9, lock)
+
+
+def test_lock_text():
+    assert p.lock_text([0, 3, 6, 7, 8]) == "A → D → ↻ → ↺ → ●"
+    assert p.lock_error([]) is None
+
+
+def test_hello_lock_flags():
+    info = p.HelloInfo(2, 1, 1, 9, 128, p.LOCK_FLAG_SET | p.LOCK_FLAG_LOCKED)
+    pkt = p.encode_response(p.Cmd.HELLO, 1, 0, p.encode_hello_result(info))
+    assert pkt[9] == 3
+    got = p.parse_hello_result(p.decode_response(pkt).result)
+    assert got.locked and not got.blocked and got.supports_lock
+    # v1 firmware: byte 9 is not a flag even if non-zero
+    v1 = p.parse_hello_result(bytes([1, 1, 0, 9, 128, 0, 0xFF]))
+    assert v1.lock_flags == 0 and not v1.supports_lock
+
+
+def test_hello_version_and_build_date():
+    info = p.HelloInfo(2, 1, 1, 9, 128, 0, 3, (2026, 10, 26, 9, 5))
+    pkt = p.encode_response(p.Cmd.HELLO, 1, 0, p.encode_hello_result(info))
+    assert pkt[10:17] == bytes([3, 0xEA, 0x07, 10, 26, 9, 5])   # firmware res[10..16]
+    got = p.parse_hello_result(p.decode_response(pkt).result)
+    assert got == info
+    assert got.fw_version == "1.1.3" and got.build_date == "2026-10-26 09:05"
+    assert got.fw_text == "펌웨어 v1.1.3 (빌드 2026-10-26 09:05)"
+
+
+def test_hello_without_build_date():
+    info = p.parse_hello_result(p.encode_hello_result(p.HelloInfo(2, 1, 1, 9, 128)))
+    assert info.build_date is None and info.fw_text == "펌웨어 v1.1.0 (빌드 날짜 없음)"
+    v1 = p.parse_hello_result(bytes([1, 1, 0, 9, 128, 0]))
+    assert v1.fw_text == "펌웨어 v1.0"

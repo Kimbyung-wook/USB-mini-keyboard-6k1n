@@ -10,8 +10,10 @@ static __xdata uint8_t blob[BLOB_CAPACITY];
 static __xdata uint8_t stage[BLOB_CAPACITY];
 static __xdata uint8_t stageLen = 0;
 
-static __xdata uint8_t slotOffset[SLOT_COUNT];
-static __xdata uint8_t slotLength[SLOT_COUNT];
+// Macro slots plus the lock pattern (SLOT_LOCK)
+#define STORED_SLOTS (SLOT_COUNT + 1)
+static __xdata uint8_t slotOffset[STORED_SLOTS];
+static __xdata uint8_t slotLength[STORED_SLOTS];
 
 uint16_t crc16_ccitt(__xdata uint8_t *data, __data uint16_t len) {
   // CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, no reflection, no xorout
@@ -65,7 +67,18 @@ static uint8_t parseBlob(__xdata uint8_t *b, __data uint16_t totalLen,
     if (pos + len > totalLen) {
       return 0;
     }
-    if (fill && i < SLOT_COUNT) {
+    if (i == SLOT_LOCK) {
+      // Empty (no lock) or LOCK_MIN_STEPS..LOCK_MAX_STEPS input numbers
+      if (len != 0 && (len < LOCK_MIN_STEPS || len > LOCK_MAX_STEPS)) {
+        return 0;
+      }
+      for (__data uint8_t j = 0; j < len; j++) {
+        if (b[pos + j] >= SLOT_COUNT) {
+          return 0;
+        }
+      }
+    }
+    if (fill && i < STORED_SLOTS) {
       slotOffset[i] = (uint8_t)pos;
       slotLength[i] = (uint8_t)len;
     }
@@ -78,13 +91,13 @@ static void loadSlots(void) {
   __data uint16_t totalLen =
       BLOB_HEADER_SIZE + (blob[4] | ((uint16_t)blob[5] << 8));
 
-  for (__data uint8_t i = 0; i < SLOT_COUNT; i++) {
+  for (__data uint8_t i = 0; i < STORED_SLOTS; i++) {
     slotLength[i] = 0;
   }
   if (!parseBlob(blob, totalLen, 1)) {
     // Invalid or blank DataFlash (parsing may have filled some slots before
-    // failing): every slot is empty
-    for (__data uint8_t i = 0; i < SLOT_COUNT; i++) {
+    // failing): every slot is empty and there is no lock
+    for (__data uint8_t i = 0; i < STORED_SLOTS; i++) {
       slotLength[i] = 0;
     }
   }
@@ -109,6 +122,10 @@ uint8_t storage_slot_len(__data uint8_t slot) {
   }
   return slotLength[slot];
 }
+
+uint8_t storage_lock_len(void) { return slotLength[SLOT_LOCK]; }
+
+__xdata uint8_t *storage_lock_steps(void) { return blob + slotOffset[SLOT_LOCK]; }
 
 uint8_t storage_stage_write(__data uint16_t offset, __data uint8_t len,
                             __xdata uint8_t *data) {
@@ -153,13 +170,16 @@ uint8_t storage_commit(__data uint16_t totalLen, __data uint16_t crc) {
   }
 
   // Program only the bytes that differ, to spare DataFlash write cycles
-  for (__data uint8_t i = 0; i < totalLen; i++) {
-    if (eeprom_read_byte(i) != stage[i]) {
-      eeprom_write_byte(i, stage[i]);
+  // The rest is blanked so an old config can never be read back (READ
+  // accepts any offset up to the capacity)
+  for (__data uint8_t i = 0; i < BLOB_CAPACITY; i++) {
+    __data uint8_t want = i < totalLen ? stage[i] : 0xFF;
+    if (eeprom_read_byte(i) != want) {
+      eeprom_write_byte(i, want);
     }
   }
-  for (__data uint8_t i = 0; i < totalLen; i++) {
-    if (eeprom_read_byte(i) != stage[i]) {
+  for (__data uint8_t i = 0; i < BLOB_CAPACITY; i++) {
+    if (eeprom_read_byte(i) != (i < totalLen ? stage[i] : 0xFF)) {
       storage_init(); // keep using whatever is really stored
       return ST_FLASH_ERR;
     }

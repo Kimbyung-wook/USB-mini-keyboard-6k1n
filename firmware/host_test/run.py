@@ -32,16 +32,23 @@ def build(out_dir: Path) -> Path:
     subprocess.run(
         ["gcc", "-std=c99", "-Wall", "-I", str(HERE / "stub"), "-I", str(SRC),
          str(HERE / "host_test.c"), str(SRC / "storage.c"), str(SRC / "macro.c"),
+         str(SRC / "lock.c"),
          "-o", str(exe)],
         check=True)
     return exe
 
 
-def run(exe: Path, out_dir: Path, blob: bytes, capslock: bool = False) -> list[str]:
+def run(exe: Path, out_dir: Path, blob: bytes, capslock: bool = False,
+        extra: list[str] | None = None) -> list[str]:
     path = out_dir / "blob.bin"
     path.write_bytes(blob)
-    args = [str(exe), str(path)] + (["caps"] if capslock else [])
+    args = [str(exe), str(path)] + (["caps"] if capslock else []) + (extra or [])
     return subprocess.run(args, check=True, capture_output=True, text=True).stdout.splitlines()
+
+
+def lock_states(lines: list[str]) -> list[str]:
+    """'lock locked flags 3' lines -> ['locked 3', ...]"""
+    return [" ".join(line.split()[1::2]) for line in lines if line.startswith("lock ")]
 
 
 def slot_lines(lines: list[str]) -> dict[int, str]:
@@ -117,6 +124,52 @@ def main() -> int:
         bad[-1] ^= 0xFF  # corrupt payload, header CRC unchanged
         lines = run(exe, out, bytes(bad))
         check("corrupt payload rejected (BAD_CRC)", lines[2], f"commit status {p.Status.BAD_CRC}")
+
+        # Lock pattern A B C knob-CW (slot 9 of the blob)
+        short = ["Hi{ENTER}", "{CTRL+C}"] + [""] * 7
+        lock = [0, 1, 2, 6]
+        locked_blob = p.encode_blob(short, lock)
+        lines = run(exe, out, locked_blob, extra=["lock", "0124", "0126"])
+        check("lock blob commits", lines[2], "commit status 0")
+        check("wrong try stays locked, right one opens", " | ".join(lock_states(lines)),
+              "locked 3 | locked 3 | open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock"] + ["1111"] * 5 + ["0126"])
+        states = lock_states(lines)
+        check("5 wrong tries block", states[5], "blocked 7")
+        check("blocked ignores the right pattern", states[6], "blocked 7")
+
+        lines = run(exe, out, locked_blob, extra=["lock", "4", "01", "t0126"])
+        check("stray input then a pause starts over", " | ".join(lock_states(lines)[1:]),
+              "locked 3 | locked 3 | open 1")
+
+        lines = run(exe, out, locked_blob, extra=["lock", "0126012"])
+        check("extra inputs after opening are ignored", lock_states(lines)[1], "open 1")
+
+        lines = run(exe, out, p.encode_blob(short), extra=["lock"])
+        check("no pattern starts open", lock_states(lines)[0], "open 0")
+
+        got = slot_lines(run(exe, out, locked_blob))
+        check("slots still type next to the lock slot", f"{got[0]} | {got[1]} | {got[8]}",
+              keys((SHIFT, 0x0b), (0, 0x0c), (0, 0x28)) + " | " + keys((CTRL, 0x06)) + " | (empty)")
+
+        for name, bad_lock in (("3-step lock", [0, 1, 2]), ("9-step lock", [0] * 9),
+                               ("lock step 9", [0, 1, 2, 9])):
+            # Built by hand: encode_blob refuses invalid patterns
+            payload = bytearray()
+            for s in short:
+                payload += len(s).to_bytes(2, "little") + s.encode()
+            payload += len(bad_lock).to_bytes(2, "little") + bytes(bad_lock)
+            blob = (b"MK" + bytes([1, 10]) + len(payload).to_bytes(2, "little")
+                    + p.crc16_ccitt_false(bytes(payload)).to_bytes(2, "little") + payload)
+            lines = run(exe, out, blob)
+            check(f"{name} rejected (BAD_ARG)", lines[2], f"commit status {p.Status.BAD_ARG}")
+
+        # A smaller config blanks what the old one left behind
+        small = out / "small.bin"
+        small.write_bytes(p.encode_blob([""] * 9))
+        lines = run(exe, out, p.encode_blob(full), extra=["tail", str(small)])
+        check("old bytes past a new blob are blanked", lines[-1], "tail dirty 0")
 
     print("all passed" if failures == 0 else f"{failures} failed")
     return 1 if failures else 0

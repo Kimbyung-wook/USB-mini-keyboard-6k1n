@@ -7,6 +7,10 @@ from collections import deque
 
 from . import protocol as p
 
+# Mock lock states (firmware lock.h)
+LOCK_OPEN, LOCK_LOCKED, LOCK_BLOCKED = 0, 1, 2
+LOCK_MAX_FAILS = 5
+
 
 class TransportError(Exception):
     """The link to the device is gone or could not be opened."""
@@ -99,14 +103,24 @@ class MockDevice(Transport):
     (what COMMIT/WRITE really accept, defaults to capacity), ``busy_count``
     (answer the next N commands after a TEST with BUSY), ``corrupt_next_write``
     (flip a byte of the next WRITE to provoke BAD_CRC), ``flash_error``,
-    ``drop_responses`` (swallow the next N responses to provoke timeouts).
+    ``drop_responses`` (swallow the next N responses to provoke timeouts),
+    ``protocol`` (1 = firmware 1.0 without the lock), ``fw`` (major, minor[, patch])
+    and ``build`` (year, month, day, hour, minute; zeros = no build date).
+
+    Like the firmware it starts locked when the stored config has a lock
+    pattern; ``enter_pattern`` plays the keyboard inputs and ``power_cycle``
+    re-plugs it.
     """
 
-    def __init__(self, capacity: int = 4096, fw: tuple[int, int] = (0, 1),
-                 storage: bytes | None = None, storage_capacity: int | None = None):
+    def __init__(self, capacity: int = 4096, fw: tuple[int, ...] = (0, 1),
+                 storage: bytes | None = None, storage_capacity: int | None = None,
+                 protocol: int = p.PROTOCOL_VERSION,
+                 build: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)):
         self.capacity = capacity
+        self.protocol = protocol
         self.storage_capacity = capacity if storage_capacity is None else storage_capacity
         self.fw = fw
+        self.build = build
         # Flash content: blank flash reads as 0xFF.
         self.storage = bytearray(b"\xFF" * self.storage_capacity)
         if storage:
@@ -124,6 +138,9 @@ class MockDevice(Transport):
         self.commit_count = 0
         self.requests: list[p.Request] = []
         self._out: deque[bytes] = deque()
+        self.lock_state = LOCK_OPEN
+        self.lock_fails = 0
+        self._init_lock()
 
     # Transport API -----------------------------------------------------
     def write(self, report: bytes) -> None:
@@ -161,6 +178,40 @@ class MockDevice(Transport):
     def stored_config(self) -> p.Config:
         return p.decode_blob(bytes(self.storage))
 
+    def power_cycle(self) -> None:
+        """Unplug and plug in again: locks again when a pattern is stored."""
+        self.reconnect()
+        self._init_lock()
+
+    def enter_pattern(self, steps: list[int]) -> None:
+        """One full try on the keyboard (key/knob inputs as slot numbers)."""
+        if self.lock_state != LOCK_LOCKED:
+            return
+        if list(steps) == self.stored_config().lock:
+            self.lock_state = LOCK_OPEN
+            self.lock_fails = 0
+            return
+        self.lock_fails += 1
+        if self.lock_fails >= LOCK_MAX_FAILS:
+            self.lock_state = LOCK_BLOCKED
+
+    @property
+    def locked(self) -> bool:
+        return self.lock_state != LOCK_OPEN
+
+    def _init_lock(self) -> None:
+        has_lock = self.protocol >= 2 and bool(self.stored_config().lock)
+        self.lock_state = LOCK_LOCKED if has_lock else LOCK_OPEN
+        self.lock_fails = 0
+
+    def _lock_flags(self) -> int:
+        flags = p.LOCK_FLAG_SET if self.stored_config().lock else 0
+        if self.lock_state != LOCK_OPEN:
+            flags |= p.LOCK_FLAG_LOCKED
+        if self.lock_state == LOCK_BLOCKED:
+            flags |= p.LOCK_FLAG_BLOCKED
+        return flags
+
     # Firmware logic --------------------------------------------------------
     def _handle(self, req: p.Request) -> bytes:
         cmd, seq, a = req.cmd, req.seq, req.args
@@ -173,9 +224,16 @@ class MockDevice(Transport):
             return reply(p.Status.BUSY)
 
         if cmd == p.Cmd.HELLO:
-            info = p.HelloInfo(p.PROTOCOL_VERSION, self.fw[0], self.fw[1],
+            info = p.HelloInfo(self.protocol, self.fw[0], self.fw[1],
                                p.SLOT_COUNT, self.capacity)
+            if self.protocol >= 2:
+                info.lock_flags = self._lock_flags()
+                info.fw_patch = self.fw[2] if len(self.fw) > 2 else 0
+                info.build = self.build
             return reply(p.Status.OK, p.encode_hello_result(info))
+
+        if self.locked and cmd in (p.Cmd.READ, p.Cmd.TEST, p.Cmd.BOOT):
+            return reply(p.Status.LOCKED)
 
         if cmd == p.Cmd.READ:
             offset, length = struct.unpack_from("<HB", a)
@@ -218,12 +276,16 @@ class MockDevice(Transport):
                 return reply(p.Status.BAD_ARG)
             if header.crc != crc or p.crc16_ccitt_false(blob[p.BLOB_HEADER_SIZE:]) != crc:
                 return reply(p.Status.BAD_CRC)
+            if not p.decode_blob(blob).valid:
+                return reply(p.Status.BAD_ARG)   # e.g. a bad lock pattern
             if self.flash_error:
                 return reply(p.Status.FLASH_ERR)
             self.storage[:] = b"\xFF" * self.storage_capacity
             self.storage[:total_len] = blob
             self.next_write_offset = 0
             self.commit_count += 1
+            if self.locked:
+                self._init_lock()   # the new config's own pattern decides
             return reply(p.Status.OK)
 
         if cmd == p.Cmd.TEST:

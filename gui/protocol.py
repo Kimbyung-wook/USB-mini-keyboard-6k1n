@@ -1,4 +1,4 @@
-"""Wire format of the configuration protocol v1 (see docs/PROTOCOL.md).
+"""Wire format of the configuration protocol v2 (see docs/PROTOCOL.md).
 
 Pure functions only: packet framing, status codes, CRC16 and the config blob.
 """
@@ -17,7 +17,9 @@ BOOTLOADER_PID = 0x55E0
 
 REPORT_SIZE = 64
 MAX_CHUNK = 56            # max data bytes per READ / WRITE
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+# v1 (firmware 1.0) is the same without the lock: no HELLO flags, no LOCKED
+SUPPORTED_PROTOCOL_VERSIONS = (1, 2)
 
 SLOT_COUNT = 9
 BLOB_MAGIC = b"MK"
@@ -37,6 +39,33 @@ SLOT_LABELS_KO = [
     "노브 시계 방향", "노브 반시계 방향", "노브 누르기",
 ]
 
+# Lock pattern: optional slot 9 of the blob, one byte per step holding the
+# slot number of the input (0-8)
+SLOT_LOCK = 9
+LOCK_MIN_STEPS = 4
+LOCK_MAX_STEPS = 8
+LOCK_STEP_NAMES = ["A", "B", "C", "D", "E", "F", "↻", "↺", "●"]
+
+# HELLO lock flags (protocol v2)
+LOCK_FLAG_SET = 0x01
+LOCK_FLAG_LOCKED = 0x02
+LOCK_FLAG_BLOCKED = 0x04
+
+
+def lock_error(lock: list[int]) -> str | None:
+    """Why a lock pattern cannot be stored, or None (an empty one means no lock)."""
+    if not lock:
+        return None
+    if any(not 0 <= s < SLOT_COUNT for s in lock):
+        return "잠금 패턴에 알 수 없는 입력이 있습니다"
+    if not LOCK_MIN_STEPS <= len(lock) <= LOCK_MAX_STEPS:
+        return f"잠금 패턴은 {LOCK_MIN_STEPS}~{LOCK_MAX_STEPS}단계여야 합니다 (지금 {len(lock)}단계)"
+    return None
+
+
+def lock_text(lock: list[int]) -> str:
+    return " → ".join(LOCK_STEP_NAMES[s] for s in lock)
+
 
 class Cmd(IntEnum):
     HELLO = 0x01
@@ -55,6 +84,7 @@ class Status(IntEnum):
     TOO_BIG = 4
     FLASH_ERR = 5
     BUSY = 6
+    LOCKED = 7
 
 
 STATUS_MESSAGES_KO = {
@@ -65,6 +95,7 @@ STATUS_MESSAGES_KO = {
     Status.TOO_BIG: "저장 용량을 초과했습니다",
     Status.FLASH_ERR: "장치의 Flash 지우기/쓰기에 실패했습니다",
     Status.BUSY: "장치가 문자열을 출력하는 중입니다. 잠시 후 다시 시도하세요",
+    Status.LOCKED: "장치가 잠겨 있습니다. 키보드에서 잠금 패턴을 입력하세요",
 }
 
 
@@ -166,19 +197,57 @@ class HelloInfo:
     fw_minor: int
     slot_count: int
     capacity: int
+    lock_flags: int = 0      # LOCK_FLAG_* (protocol v2)
+    fw_patch: int = 0        # protocol v2
+    build: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)  # year, month, day, hour, minute; 0 = unknown
 
     @property
     def fw_version(self) -> str:
+        if self.supports_lock:   # v2 also reports the patch number
+            return f"{self.fw_major}.{self.fw_minor}.{self.fw_patch}"
         return f"{self.fw_major}.{self.fw_minor}"
+
+    @property
+    def build_date(self) -> str | None:
+        """'2026-10-26 11:40', or None when the firmware was built without a date."""
+        year, month, day, hour, minute = self.build
+        if not year:
+            return None
+        return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}"
+
+    @property
+    def fw_text(self) -> str:
+        """Version and build date for display."""
+        if not self.supports_lock:
+            return f"펌웨어 v{self.fw_version}"
+        date = self.build_date
+        return f"펌웨어 v{self.fw_version} (빌드 {date})" if date else f"펌웨어 v{self.fw_version} (빌드 날짜 없음)"
+
+    @property
+    def supports_lock(self) -> bool:
+        return self.protocol_version >= 2
+
+    @property
+    def locked(self) -> bool:
+        return bool(self.lock_flags & LOCK_FLAG_LOCKED)
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.lock_flags & LOCK_FLAG_BLOCKED)
 
 
 def encode_hello_result(info: HelloInfo) -> bytes:
-    return struct.pack("<BBBBH", info.protocol_version, info.fw_major,
-                       info.fw_minor, info.slot_count, info.capacity)
+    return struct.pack("<BBBBHBBHBBBB", info.protocol_version, info.fw_major,
+                       info.fw_minor, info.slot_count, info.capacity, info.lock_flags,
+                       info.fw_patch, *info.build)
 
 
 def parse_hello_result(result: bytes) -> HelloInfo:
-    return HelloInfo(*struct.unpack_from("<BBBBH", result))
+    info = HelloInfo(*struct.unpack_from("<BBBBH", result))
+    if info.supports_lock and len(result) >= 14:
+        info.lock_flags, info.fw_patch, *build = struct.unpack_from("<BBHBBBB", result, 6)
+        info.build = tuple(build)
+    return info
 
 
 def encode_read_result(offset: int, data: bytes) -> bytes:
@@ -196,10 +265,11 @@ def parse_read_result(result: bytes) -> tuple[int, bytes]:
 
 @dataclass
 class Config:
-    """Nine macro strings plus a flag telling whether the blob was valid."""
+    """Nine macro strings, the lock pattern and whether the blob was valid."""
     slots: list[str] = field(default_factory=lambda: [""] * SLOT_COUNT)
     valid: bool = True       # False -> "설정 없음" (blank or corrupt blob)
     reason: str = ""         # why the blob was rejected, for display
+    lock: list[int] = field(default_factory=list)   # empty = no lock
 
     @classmethod
     def empty(cls, reason: str = "") -> "Config":
@@ -210,29 +280,42 @@ class BlobError(ValueError):
     pass
 
 
-def encode_blob(slots: list[str]) -> bytes:
-    """Encode slot strings into a v1 blob. Strings must be ASCII."""
+def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = ()) -> bytes:
+    """Encode slot strings into a v1 blob. Strings must be ASCII.
+
+    A lock pattern is stored as a 10th slot; without one the blob has 9 slots
+    exactly as firmware 1.0 expects.
+    """
     if len(slots) != SLOT_COUNT:
         raise BlobError(f"need {SLOT_COUNT} slots, got {len(slots)}")
-    payload = bytearray()
+    lock = list(lock)
+    err = lock_error(lock)
+    if err:
+        raise BlobError(err)
+    raws = []
     for i, text in enumerate(slots):
         try:
-            raw = text.encode("ascii")
+            raws.append(text.encode("ascii"))
         except UnicodeEncodeError as e:
             raise BlobError(f"slot {i} contains non-ASCII text") from e
+    if lock:
+        raws.append(bytes(lock))
+    payload = bytearray()
+    for i, raw in enumerate(raws):
         if len(raw) > 0xFFFF:
             raise BlobError(f"slot {i} too long")
         payload += struct.pack("<H", len(raw)) + raw
     if len(payload) > 0xFFFF:
         raise BlobError("payload too long")
-    header = BLOB_MAGIC + struct.pack("<BBHH", BLOB_VERSION, SLOT_COUNT,
+    header = BLOB_MAGIC + struct.pack("<BBHH", BLOB_VERSION, len(raws),
                                       len(payload), crc16_ccitt_false(bytes(payload)))
     return header + bytes(payload)
 
 
-def blob_size(slots: list[str]) -> int:
-    """Total blob length (header + payload) for the given slot texts."""
-    return BLOB_HEADER_SIZE + sum(2 + len(s.encode("ascii", errors="replace")) for s in slots)
+def blob_size(slots: list[str], lock: list[int] | tuple[int, ...] = ()) -> int:
+    """Total blob length (header + payload) for the given slot texts and lock."""
+    size = BLOB_HEADER_SIZE + sum(2 + len(s.encode("ascii", errors="replace")) for s in slots)
+    return size + (2 + len(lock) if lock else 0)
 
 
 @dataclass
@@ -267,7 +350,7 @@ def decode_blob(data: bytes) -> Config:
             raise BlobError("블롭 길이가 헤더와 맞지 않습니다")
         if crc16_ccitt_false(payload) != header.crc:
             raise BlobError("CRC가 일치하지 않습니다")
-        slots: list[str] = []
+        raws: list[bytes] = []
         pos = 0
         for _ in range(header.slot_count):
             if pos + 2 > len(payload):
@@ -276,13 +359,17 @@ def decode_blob(data: bytes) -> Config:
             pos += 2
             if pos + n > len(payload):
                 raise BlobError("슬롯 데이터가 잘렸습니다")
-            # latin-1 never fails; non-ASCII bytes are caught by the validator
-            slots.append(payload[pos:pos + n].decode("latin-1"))
+            raws.append(bytes(payload[pos:pos + n]))
             pos += n
         if pos != len(payload):
             raise BlobError("페이로드 끝에 남는 데이터가 있습니다")
+        lock = list(raws[SLOT_LOCK]) if len(raws) > SLOT_LOCK else []
+        if lock_error(lock):
+            raise BlobError(lock_error(lock))
     except (BlobError, struct.error) as e:
         return Config.empty(str(e))
+    # latin-1 never fails; non-ASCII bytes are caught by the validator.
     # Tolerate a different slot count: keep the first 9, pad with empty.
-    slots = (slots + [""] * SLOT_COUNT)[:SLOT_COUNT]
-    return Config(slots, valid=True)
+    slots = [r.decode("latin-1") for r in raws[:SLOT_COUNT]]
+    slots += [""] * (SLOT_COUNT - len(slots))
+    return Config(slots, valid=True, lock=lock)

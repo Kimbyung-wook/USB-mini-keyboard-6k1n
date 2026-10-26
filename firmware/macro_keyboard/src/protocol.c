@@ -3,6 +3,7 @@
 #include "config.h"
 #include "protocol.h"
 #include "storage.h"
+#include "lock.h"
 #include "macro.h"
 #include "usb/hid.h"
 // clang-format on
@@ -38,11 +39,23 @@ uint8_t protocol_poll(void) {
     res[6] = SLOT_COUNT;
     res[7] = BLOB_CAPACITY & 0xFF;
     res[8] = BLOB_CAPACITY >> 8;
+    res[9] = lock_flags();
+    res[10] = FW_PATCH;
+    res[11] = FW_BUILD_YEAR & 0xFF;
+    res[12] = FW_BUILD_YEAR >> 8;
+    res[13] = FW_BUILD_MONTH;
+    res[14] = FW_BUILD_DAY;
+    res[15] = FW_BUILD_HOUR;
+    res[16] = FW_BUILD_MINUTE;
     break;
 
   case CMD_READ: {
     __data uint16_t offset = U16(req[2], req[3]);
     __data uint8_t len = req[4];
+    if (lock_state() != LOCK_OPEN) {
+      status = ST_LOCKED;
+      break;
+    }
     if (len == 0 || len > PROTO_MAX_CHUNK || offset + len > BLOB_CAPACITY) {
       status = ST_BAD_ARG;
       break;
@@ -56,6 +69,9 @@ uint8_t protocol_poll(void) {
     break;
   }
 
+  // WRITE/COMMIT work while locked: a new config replaces everything
+  // (the old one is blanked), so it gives nothing away and lets an owner
+  // who forgot the pattern start over
   case CMD_WRITE:
     if (macro_busy()) {
       status = ST_BUSY;
@@ -70,13 +86,16 @@ uint8_t protocol_poll(void) {
     } else {
       status = storage_commit(U16(req[2], req[3]), U16(req[4], req[5]));
       if (status == ST_OK) {
+        lock_config_changed();
         event = PROTO_EVT_SAVED;
       }
     }
     break;
 
   case CMD_TEST:
-    if (req[2] >= SLOT_COUNT) {
+    if (lock_state() != LOCK_OPEN) {
+      status = ST_LOCKED;
+    } else if (req[2] >= SLOT_COUNT) {
       status = ST_BAD_ARG;
     } else if (macro_busy()) {
       status = ST_BUSY;
@@ -86,7 +105,11 @@ uint8_t protocol_poll(void) {
     break;
 
   case CMD_BOOT:
-    event = PROTO_EVT_BOOT;
+    if (lock_state() != LOCK_OPEN) {
+      status = ST_LOCKED;
+    } else {
+      event = PROTO_EVT_BOOT;
+    }
     break;
 
   default:

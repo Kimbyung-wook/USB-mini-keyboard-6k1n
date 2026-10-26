@@ -15,7 +15,7 @@ __code USB_Descriptor_Device_t DeviceDescriptor = {
 
     .VendorID = USB_VID,
     .ProductID = USB_PID,
-    .ReleaseNumber = VERSION_BCD(FW_MAJOR, FW_MINOR, 0),
+    .ReleaseNumber = VERSION_BCD(FW_MAJOR, FW_MINOR, FW_PATCH),
 
     .ManufacturerStrIndex = 1,
     .ProductStrIndex = 2,
