@@ -10,9 +10,16 @@
 
 #define U16(lo, hi) ((uint16_t)(lo) | ((uint16_t)(hi) << 8))
 
+// Fixed buffers: indexing them is much shorter than going through a pointer
+// clang-format off
+#include "usb/USBconstant.h"
+extern __xdata __at (EP2_ADDR) uint8_t Ep2Buffer[];
+extern __xdata __at (EP2_ADDR + 64) uint8_t Ep2InBuffer[];
+// clang-format on
+#define req Ep2Buffer
+#define res Ep2InBuffer
+
 uint8_t protocol_poll(void) {
-  __xdata uint8_t *req;
-  __xdata uint8_t *res;
   __data uint8_t cmd;
   __data uint8_t status = ST_OK;
   __data uint8_t event = PROTO_EVT_NONE;
@@ -21,8 +28,6 @@ uint8_t protocol_poll(void) {
   if (!vendor_has_request() || vendor_in_busy()) {
     return PROTO_EVT_NONE;
   }
-  req = vendor_request();
-  res = vendor_response();
   cmd = req[0];
 
   for (__data uint8_t i = 0; i < 64; i++) {

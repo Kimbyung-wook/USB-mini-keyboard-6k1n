@@ -13,6 +13,7 @@
 __xdata __at (EP0_ADDR) uint8_t Ep0Buffer[8];     
 __xdata __at (EP1_ADDR) uint8_t Ep1Buffer[128];
 __xdata __at (EP2_ADDR) uint8_t Ep2Buffer[128];
+__xdata __at (EP2_ADDR + 64) uint8_t Ep2InBuffer[64]; // IN half of Ep2Buffer
 // clang-format on
 
 #if (EP2_ADDR + 128) > USER_USB_RAM

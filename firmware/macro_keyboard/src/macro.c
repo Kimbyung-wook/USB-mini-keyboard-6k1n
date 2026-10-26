@@ -84,18 +84,21 @@ static __code KeyName modNames[] = {
     {"CTRL", MOD_CTRL}, {"SHIFT", MOD_SHIFT}, {"ALT", MOD_ALT}, {"WIN", MOD_WIN},
 };
 
-#define QUEUE_SIZE 8
+#define QUEUE_SIZE 8 // power of two: positions wrap with & (QUEUE_SIZE - 1)
+#if QUEUE_SIZE & (QUEUE_SIZE - 1)
+#error QUEUE_SIZE must be a power of two
+#endif
 static __xdata uint8_t queue[QUEUE_SIZE];
-static __xdata uint8_t queueHead = 0;
-static __xdata uint8_t queueCount = 0;
+static __xdata uint8_t queueHead;
+static __xdata uint8_t queueCount;
 
 // Current playback
-static __xdata uint8_t active = 0;
+static __xdata uint8_t active;
 static __xdata uint8_t *text;
 static __xdata uint8_t textLen;
 static __xdata uint8_t pos;
-static __xdata uint8_t needRelease = 0;
-static __xdata uint8_t delaying = 0;
+static __xdata uint8_t needRelease;
+static __xdata uint8_t delaying;
 static __xdata uint16_t delayMs;
 static __xdata uint32_t delayStart;
 
@@ -114,7 +117,7 @@ static uint8_t upper(uint8_t c) {
 
 // Case-insensitive compare of text[start, end) with a NUL-terminated name
 static uint8_t nameEquals(__data uint8_t start, __data uint8_t end,
-                          const char *name) {
+                          __code const char *name) {
   __data uint8_t i = 0;
   while (start < end) {
     if (name[i] == 0 || upper(text[start]) != name[i]) {
@@ -182,7 +185,8 @@ static uint8_t parseBraced(__data uint8_t start, __data uint8_t end) {
       if (text[i] < '0' || text[i] > '9') {
         return TOK_NONE;
       }
-      tokDelay = tokDelay * 10 + (text[i] - '0');
+      // x10 as shifts: no 16-bit multiply library
+      tokDelay = (tokDelay << 3) + (tokDelay << 1) + (text[i] - '0');
       if (tokDelay > 10000) {
         return TOK_NONE;
       }
@@ -276,7 +280,7 @@ uint8_t macro_enqueue(__data uint8_t slot) {
   if (storage_slot_len(slot) == 0 || queueCount >= QUEUE_SIZE) {
     return 0;
   }
-  queue[(queueHead + queueCount) % QUEUE_SIZE] = slot;
+  queue[(queueHead + queueCount) & (QUEUE_SIZE - 1)] = slot;
   queueCount++;
   return 1;
 }
@@ -290,7 +294,7 @@ void macro_task(void) {
       return;
     }
     slot = queue[queueHead];
-    queueHead = (queueHead + 1) % QUEUE_SIZE;
+    queueHead = (queueHead + 1) & (QUEUE_SIZE - 1);
     queueCount--;
     text = storage_slot_text(slot);
     textLen = storage_slot_len(slot);

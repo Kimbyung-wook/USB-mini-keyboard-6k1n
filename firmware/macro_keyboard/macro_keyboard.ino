@@ -55,7 +55,7 @@ __xdata uint16_t keyChangedAt[NUM_KEYS];
 // On this board a clockwise turn counts negative (checked with test_pinmap).
 __code int8_t encTable[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
 uint8_t encPrev;
-int8_t encCount = 0;
+int8_t encCount;
 
 #define COLOR_OFF 0
 #define COLOR_IDLE 1
@@ -75,16 +75,21 @@ int8_t encCount = 0;
 #define NUM_LEDS 8
 
 __xdata uint8_t ledData[NUM_LEDS * 3];
-uint8_t ledColor = COLOR_OFF;
+uint8_t ledColor; // COLOR_OFF
 uint16_t ledSentAt;
-uint8_t savedFlash = 0;
+uint8_t savedFlash;
 uint16_t savedAt;
-uint8_t pressFlash = 0;
+uint8_t pressFlash;
 uint16_t pressAt;
+uint16_t blinkAt; // start of the current locked blink period
 
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
+  // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
+  __xdata uint8_t *p = ledData;
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
-    set_pixel_for_GRB_LED(ledData, i, r, g, b);
+    *p++ = g;
+    *p++ = r;
+    *p++ = b;
   }
 }
 
@@ -131,8 +136,13 @@ void updateLed() {
   } else if (lock_entering()) {
     showColor(COLOR_RED);
   } else if (lock_state() == LOCK_LOCKED) {
-    showColor(millis() % LOCKED_BLINK_PERIOD < LOCKED_BLINK_MS ? COLOR_RED
-                                                                : COLOR_OFF);
+    // 16-bit period counter instead of millis() % period (32-bit modulo)
+    uint16_t sinceBlink = (uint16_t)millis() - blinkAt;
+    if (sinceBlink >= LOCKED_BLINK_PERIOD) {
+      blinkAt += sinceBlink; // restart the period now, also after a long gap
+      sinceBlink = 0;
+    }
+    showColor(sinceBlink < LOCKED_BLINK_MS ? COLOR_RED : COLOR_OFF);
   } else {
     showColor(macro_busy() || pressFlash ? COLOR_TYPING : COLOR_IDLE);
   }
@@ -166,7 +176,7 @@ void onInput(uint8_t slot) {
 
 // Knob switch. With a lock pattern stored, a press is typed on release so
 // that holding it for LOCK_HOLD_MS can start a pattern entry instead.
-uint8_t knobHeld = 0; // a press still waiting for release or the hold time
+uint8_t knobHeld; // a press still waiting for release or the hold time
 uint16_t knobDownAt;
 
 void knobDown(uint16_t now) {

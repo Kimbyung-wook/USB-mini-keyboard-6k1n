@@ -17,11 +17,11 @@ extern __xdata __at (EP2_ADDR) uint8_t Ep2Buffer[];
 
 void delayMicroseconds(uint16_t us);
 
-__xdata uint8_t keyboardLedStatus = 0;
+__xdata uint8_t keyboardLedStatus;
 
-volatile __xdata uint8_t UpPoint1_Busy = 0;
-volatile __xdata uint8_t UpPoint2_Busy = 0;
-volatile __xdata uint8_t vendorRequestPending = 0;
+volatile __xdata uint8_t UpPoint1_Busy;
+volatile __xdata uint8_t UpPoint2_Busy;
+volatile __xdata uint8_t vendorRequestPending;
 
 void USBInit() {
   USBDeviceCfg();         // Device mode configuration
@@ -103,10 +103,6 @@ uint8_t kb_send(__data uint8_t modifiers, __data uint8_t keycode) {
 uint8_t vendor_has_request(void) { return vendorRequestPending; }
 
 uint8_t vendor_in_busy(void) { return UpPoint2_Busy; }
-
-__xdata uint8_t *vendor_request(void) { return Ep2Buffer; }
-
-__xdata uint8_t *vendor_response(void) { return Ep2Buffer + 64; }
 
 uint8_t vendor_send(void) {
   __data uint8_t ok = 0;
