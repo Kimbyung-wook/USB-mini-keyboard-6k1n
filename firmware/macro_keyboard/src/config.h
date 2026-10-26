@@ -4,7 +4,7 @@
 // Firmware version reported by HELLO and the USB device descriptor
 #define FW_MAJOR 1
 #define FW_MINOR 2
-#define FW_PATCH 0
+#define FW_PATCH 1
 
 // Build date reported by HELLO, passed in by tools/build_fw.ps1
 // (-DFW_BUILD_YEAR=2026 ...). It stays 0 ("no date") in other builds such
