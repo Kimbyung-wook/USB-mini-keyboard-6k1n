@@ -63,4 +63,17 @@
 #define PIN_ENC_B 31 // P3.1
 #define PIN_LED 34   // P3.4, one WS2812 (GRB)
 
+// The sketch reads and writes the ports directly instead of digitalRead and
+// friends (saves the core's pin tables). It relies on this layout:
+#define PIN_PORT(p) ((p) / 10)
+#define PIN_BIT(p) (1 << ((p) % 10))
+#if PIN_PORT(PIN_KEY_A) != 1 || PIN_PORT(PIN_KEY_B) != 1 ||     PIN_PORT(PIN_KEY_C) != 1 || PIN_PORT(PIN_KEY_D) != 1 ||     PIN_PORT(PIN_KEY_E) != 1
+#error keys A-E must be on P1
+#endif
+#if PIN_PORT(PIN_KEY_F) != 3 || PIN_PORT(PIN_KNOB_SW) != 3 ||     PIN_ENC_A != 30 || PIN_ENC_B != 31 || PIN_PORT(PIN_LED) != 3
+#error key F, knob and LED must be on P3, encoder A/B on P3.0/P3.1
+#endif
+#define P1_INPUTS (PIN_BIT(PIN_KEY_A) | PIN_BIT(PIN_KEY_B) | PIN_BIT(PIN_KEY_C) |                    PIN_BIT(PIN_KEY_D) | PIN_BIT(PIN_KEY_E))
+#define P3_INPUTS (PIN_BIT(PIN_KEY_F) | PIN_BIT(PIN_KNOB_SW) |                    PIN_BIT(PIN_ENC_A) | PIN_BIT(PIN_ENC_B))
+
 #endif

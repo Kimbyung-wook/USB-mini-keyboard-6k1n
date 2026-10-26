@@ -40,9 +40,12 @@
 
 #define NUM_KEYS 7
 #define KNOB_KEY 6 // index of the knob switch below
-// Slot order: A, B, C, D, E, F, knob press
-__code uint8_t keyPins[NUM_KEYS] = {PIN_KEY_A, PIN_KEY_B, PIN_KEY_C, PIN_KEY_D,
-                                    PIN_KEY_E, PIN_KEY_F, PIN_KNOB_SW};
+// Slot order: A, B, C, D, E, F, knob press. The first P1_KEYS are on P1,
+// the rest on P3 (checked in config.h).
+#define P1_KEYS 5
+__code uint8_t keyBits[NUM_KEYS] = {
+    PIN_BIT(PIN_KEY_A), PIN_BIT(PIN_KEY_B), PIN_BIT(PIN_KEY_C), PIN_BIT(PIN_KEY_D),
+    PIN_BIT(PIN_KEY_E), PIN_BIT(PIN_KEY_F), PIN_BIT(PIN_KNOB_SW)};
 __code uint8_t keySlots[NUM_KEYS] = {0, 1, 2, 3, 4, 5, SLOT_KNOB_PRESS};
 
 #define DEBOUNCE_MS 20
@@ -205,14 +208,15 @@ void checkKnobHold(uint16_t now) {
 }
 
 uint8_t readEncoder() {
-  return (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
+  uint8_t p = P3; // A = P3.0, B = P3.1
+  return ((p & 1) << 1) | ((p >> 1) & 1);
 }
 
 void scanKeys() {
   uint16_t now = (uint16_t)millis();
 
   for (uint8_t i = 0; i < NUM_KEYS; i++) {
-    uint8_t pressed = !digitalRead(keyPins[i]);
+    uint8_t pressed = !((i < P1_KEYS ? P1 : P3) & keyBits[i]);
 
     if (pressed != keyLast[i]) {
       keyLast[i] = pressed;
@@ -251,20 +255,17 @@ void scanEncoder() {
 }
 
 void setup() {
-  for (uint8_t i = 0; i < NUM_KEYS; i++) {
-    pinMode(keyPins[i], INPUT_PULLUP);
-    keyStable[i] = 0;
-    keyLast[i] = 0;
-    keyChangedAt[i] = 0;
-  }
-  pinMode(PIN_ENC_A, INPUT_PULLUP);
-  pinMode(PIN_ENC_B, INPUT_PULLUP);
-  pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);
+  // Same registers as pinMode: inputs with pull-up are open drain + pull-up,
+  // the LED pin push-pull output, driven low
+  P1_MOD_OC |= P1_INPUTS;
+  P1_DIR_PU |= P1_INPUTS;
+  P3_MOD_OC = (P3_MOD_OC | P3_INPUTS) & ~PIN_BIT(PIN_LED);
+  P3_DIR_PU |= P3_INPUTS | PIN_BIT(PIN_LED);
+  P3 &= ~PIN_BIT(PIN_LED);
 
   // Holding the knob while plugging in enters the bootloader
   delay(20);
-  if (!digitalRead(PIN_KNOB_SW)) {
+  if (!(P3 & PIN_BIT(PIN_KNOB_SW))) {
     jumpToBootloader();
   }
 
