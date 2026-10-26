@@ -99,6 +99,7 @@ stateDiagram-v2
 
 | 경로 | 내용 |
 |---|---|
+| [docs/MANUAL.md](docs/MANUAL.md) | **사용 설명서**: 키보드 사용 방법(LED, 패턴 암호)과 설정 프로그램(GUI) 사용 방법 |
 | [PLAN.md](PLAN.md) | 전체 계획, 하드웨어 조사 기록, 단계별 진행 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 펌웨어와 GUI가 공유하는 Vendor HID 설정 통신 규격 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 빌드 오류, 업로드 실패와 복구 등 실제로 겪은 문제와 해결 방법 |
@@ -109,6 +110,8 @@ stateDiagram-v2
 | [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
 
 ## 빠른 시작
+
+사용 방법은 [사용 설명서(docs/MANUAL.md)](docs/MANUAL.md)를 보세요. 아래는 개발용 빌드와 실행 방법입니다.
 
 **펌웨어 빌드**: Arduino IDE + CH55xDuino 0.0.26. 보드 설정과 Windows 빌드 오류 패치는 [firmware/test_pinmap/README.md](firmware/test_pinmap/README.md)를 보세요. 빌드 일자를 넣으려면 스크립트로 빌드합니다(버전은 `firmware/macro_keyboard/src/config.h`):
 
