@@ -21,7 +21,6 @@ PROTOCOL_VERSION = 2
 # v1 (firmware 1.0) is the same without the lock: no HELLO flags, no LOCKED
 SUPPORTED_PROTOCOL_VERSIONS = (1, 2)
 
-SLOT_COUNT = 9
 BLOB_MAGIC = b"MK"
 BLOB_VERSION = 1
 BLOB_HEADER_SIZE = 8
@@ -29,22 +28,10 @@ BLOB_HEADER_SIZE = 8
 TIMEOUT_MS = 1000
 COMMIT_TIMEOUT_MS = 2000
 
-# Slot numbers
-SLOT_KNOB_CW = 6
-SLOT_KNOB_CCW = 7
-SLOT_KNOB_PRESS = 8
-SLOT_NAMES = ["A", "B", "C", "D", "E", "F", "CW", "CCW", "PRESS"]
-SLOT_LABELS_KO = [
-    "키 A", "키 B", "키 C", "키 D", "키 E", "키 F",
-    "노브 시계 방향", "노브 반시계 방향", "노브 누르기",
-]
-
-# Lock pattern: optional slot 9 of the blob, one byte per step holding the
-# slot number of the input (0-8)
-SLOT_LOCK = 9
+# Lock pattern: optional extra slot after the macro slots, one byte per step
+# holding the slot number of the input
 LOCK_MIN_STEPS = 4
 LOCK_MAX_STEPS = 8
-LOCK_STEP_NAMES = ["A", "B", "C", "D", "E", "F", "↻", "↺", "●"]
 
 # HELLO lock flags (protocol v2)
 LOCK_FLAG_SET = 0x01
@@ -52,19 +39,128 @@ LOCK_FLAG_LOCKED = 0x02
 LOCK_FLAG_BLOCKED = 0x04
 
 
-def lock_error(lock: list[int]) -> str | None:
+# ---------------------------------------------------------------- board
+
+BOARD_INFO_VERSION = 1      # HELLO byte 17 (docs/BOARD_INFO.md)
+BOARD_FEATURE_RGB_LED = 0x01
+BOARD_FEATURE_LOCK = 0x02
+MAX_SLOTS = 63
+BOARD_NAME_LEN = 8
+
+# Actions of one knob, in slot order
+KNOB_ACTIONS = ("CW", "CCW", "PRESS")
+KNOB_ACTIONS_KO = ("시계 방향", "반시계 방향", "누르기")
+KNOB_SYMBOLS = ("↻", "↺", "●")
+
+
+@dataclass(frozen=True)
+class Board:
+    """Keys and knobs of a keyboard, as its HELLO reports them.
+
+    Slots: keys 0..keys-1 in rows from the top left, then CW, CCW, PRESS
+    for each knob; the lock pattern is stored after them (lock_slot).
+    """
+    keys: int = 6
+    knobs: int = 1
+    rows: int = 2
+    name: str = "MK6K1N"
+    chip_id: int = 0x52                  # as the bootloader's Detect reports it
+    features: int = BOARD_FEATURE_RGB_LED | BOARD_FEATURE_LOCK
+    uid: bytes = b""                     # chip unique ID, empty when unknown
+
+    def __post_init__(self):
+        if self.keys < 1 or self.knobs < 0 or self.slot_count > MAX_SLOTS:
+            raise ValueError(f"지원하지 않는 배치입니다 (키 {self.keys}, 노브 {self.knobs})")
+        if not 1 <= self.rows <= self.keys:
+            raise ValueError(f"키 배치의 행 수가 올바르지 않습니다 ({self.rows})")
+
+    @property
+    def slot_count(self) -> int:
+        return self.keys + 3 * self.knobs
+
+    @property
+    def lock_slot(self) -> int:
+        return self.slot_count
+
+    @property
+    def cols(self) -> int:
+        return -(-self.keys // self.rows)
+
+    def knob_slot(self, knob: int, action: int) -> int:
+        return self.keys + 3 * knob + action
+
+    def knob_of(self, slot: int) -> tuple[int, int] | None:
+        """(knob, action) of a knob slot, None for a key."""
+        if slot < self.keys:
+            return None
+        return divmod(slot - self.keys, 3)
+
+    def key_name(self, key: int) -> str:
+        return chr(ord("A") + key) if key < 26 else f"K{key + 1}"
+
+    def slot_name(self, slot: int) -> str:
+        """Short name, also the "key" of a JSON backup: A..F, CW, CCW, PRESS, CW2, …"""
+        knob = self.knob_of(slot)
+        if knob is None:
+            return self.key_name(slot)
+        n, action = knob
+        return KNOB_ACTIONS[action] + (f"{n + 1}" if n else "")
+
+    def slot_label(self, slot: int) -> str:
+        """Korean label: 키 A, 노브 시계 방향 (노브 2 시계 방향 with several knobs)."""
+        knob = self.knob_of(slot)
+        if knob is None:
+            return f"키 {self.key_name(slot)}"
+        n, action = knob
+        return f"노브{f' {n + 1}' if self.knobs > 1 else ''} {KNOB_ACTIONS_KO[action]}"
+
+    def step_name(self, slot: int) -> str:
+        """Lock pattern step: the key letter, or the knob symbol."""
+        knob = self.knob_of(slot)
+        if knob is None:
+            return self.key_name(slot)
+        n, action = knob
+        return (f"{n + 1}" if self.knobs > 1 else "") + KNOB_SYMBOLS[action]
+
+    @property
+    def slot_names(self) -> list[str]:
+        return [self.slot_name(i) for i in range(self.slot_count)]
+
+    @property
+    def slot_labels(self) -> list[str]:
+        return [self.slot_label(i) for i in range(self.slot_count)]
+
+    @property
+    def summary(self) -> str:
+        knobs = f" + 노브 {self.knobs}" if self.knobs else ""
+        return f"키 {self.keys}{knobs}"
+
+
+# The keyboard of this project; also assumed for firmware without board info
+DEFAULT_BOARD = Board()
+
+# Slot numbers of DEFAULT_BOARD. Code that depends on the connected keyboard
+# uses its Board instead.
+SLOT_COUNT = DEFAULT_BOARD.slot_count
+SLOT_KNOB_CW = DEFAULT_BOARD.knob_slot(0, 0)
+SLOT_KNOB_CCW = DEFAULT_BOARD.knob_slot(0, 1)
+SLOT_KNOB_PRESS = DEFAULT_BOARD.knob_slot(0, 2)
+SLOT_LOCK = DEFAULT_BOARD.lock_slot
+
+
+def lock_error(lock: list[int], board: Board = DEFAULT_BOARD) -> str | None:
     """Why a lock pattern cannot be stored, or None (an empty one means no lock)."""
     if not lock:
         return None
-    if any(not 0 <= s < SLOT_COUNT for s in lock):
+    if any(not 0 <= s < board.slot_count for s in lock):
         return "패턴 암호에 알 수 없는 입력이 있습니다"
     if not LOCK_MIN_STEPS <= len(lock) <= LOCK_MAX_STEPS:
         return f"패턴 암호는 {LOCK_MIN_STEPS}~{LOCK_MAX_STEPS}단계여야 합니다 (지금 {len(lock)}단계)"
     return None
 
 
-def lock_text(lock: list[int]) -> str:
-    return " → ".join(LOCK_STEP_NAMES[s] for s in lock)
+def lock_text(lock: list[int], board: Board = DEFAULT_BOARD) -> str:
+    return " → ".join(board.step_name(s) for s in lock)
 
 
 class Cmd(IntEnum):
@@ -200,6 +296,11 @@ class HelloInfo:
     lock_flags: int = 0      # LOCK_FLAG_* (protocol v2)
     fw_patch: int = 0        # protocol v2
     build: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)  # year, month, day, hour, minute; 0 = unknown
+    board_info: Board | None = None   # HELLO bytes 17-35; None = firmware without board info
+
+    @property
+    def board(self) -> Board:
+        return self.board_info or DEFAULT_BOARD
 
     @property
     def fw_version(self) -> str:
@@ -236,10 +337,41 @@ class HelloInfo:
         return bool(self.lock_flags & LOCK_FLAG_BLOCKED)
 
 
+# Board info inside the HELLO result (bytes 3..63): packet byte 17 = result[14]
+BOARD_INFO_OFFSET = 14
+BOARD_INFO_FORMAT = f"<BBBBBBB{BOARD_NAME_LEN}s4s"
+
+
 def encode_hello_result(info: HelloInfo) -> bytes:
-    return struct.pack("<BBBBHBBHBBBB", info.protocol_version, info.fw_major,
-                       info.fw_minor, info.slot_count, info.capacity, info.lock_flags,
-                       info.fw_patch, *info.build)
+    out = struct.pack("<BBBBHBBHBBBB", info.protocol_version, info.fw_major,
+                      info.fw_minor, info.slot_count, info.capacity, info.lock_flags,
+                      info.fw_patch, *info.build)
+    b = info.board_info
+    if b is not None:
+        out += struct.pack(BOARD_INFO_FORMAT, BOARD_INFO_VERSION, b.chip_id, b.keys, b.knobs,
+                           b.rows, b.features, 0, b.name.encode("ascii")[:BOARD_NAME_LEN],
+                           b.uid[:4].ljust(4, bytes(1)))
+    return out
+
+
+class BoardInfoError(ValueError):
+    pass
+
+
+def parse_board_info(result: bytes) -> Board | None:
+    """Board from HELLO bytes 17-35, None when the firmware sends none (byte 17 = 0)."""
+    if len(result) < BOARD_INFO_OFFSET + struct.calcsize(BOARD_INFO_FORMAT):
+        return None
+    version, chip, keys, knobs, rows, features, _, name, uid = struct.unpack_from(
+        BOARD_INFO_FORMAT, result, BOARD_INFO_OFFSET)
+    if version == 0:
+        return None
+    try:
+        return Board(keys=keys, knobs=knobs, rows=rows, chip_id=chip, features=features,
+                     name=name.rstrip(bytes(1)).decode("ascii", errors="replace"),
+                     uid=b"" if uid == bytes(4) else uid)
+    except ValueError as e:
+        raise BoardInfoError(str(e)) from e
 
 
 def parse_hello_result(result: bytes) -> HelloInfo:
@@ -247,6 +379,7 @@ def parse_hello_result(result: bytes) -> HelloInfo:
     if info.supports_lock and len(result) >= 14:
         info.lock_flags, info.fw_patch, *build = struct.unpack_from("<BBHBBBB", result, 6)
         info.build = tuple(build)
+        info.board_info = parse_board_info(result)
     return info
 
 
@@ -265,31 +398,32 @@ def parse_read_result(result: bytes) -> tuple[int, bytes]:
 
 @dataclass
 class Config:
-    """Nine macro strings, the lock pattern and whether the blob was valid."""
+    """Macro strings, the lock pattern and whether the blob was valid."""
     slots: list[str] = field(default_factory=lambda: [""] * SLOT_COUNT)
     valid: bool = True       # False -> "설정 없음" (blank or corrupt blob)
     reason: str = ""         # why the blob was rejected, for display
     lock: list[int] = field(default_factory=list)   # empty = no lock
 
     @classmethod
-    def empty(cls, reason: str = "") -> "Config":
-        return cls([""] * SLOT_COUNT, valid=False, reason=reason)
+    def empty(cls, reason: str = "", board: Board = DEFAULT_BOARD) -> "Config":
+        return cls([""] * board.slot_count, valid=False, reason=reason)
 
 
 class BlobError(ValueError):
     pass
 
 
-def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = ()) -> bytes:
+def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = (),
+                board: Board = DEFAULT_BOARD) -> bytes:
     """Encode slot strings into a v1 blob. Strings must be ASCII.
 
-    A lock pattern is stored as a 10th slot; without one the blob has 9 slots
-    exactly as firmware 1.0 expects.
+    A lock pattern is stored as one more slot (lock_slot); without one the
+    blob has exactly the board's slots, as firmware 1.0 expects.
     """
-    if len(slots) != SLOT_COUNT:
-        raise BlobError(f"need {SLOT_COUNT} slots, got {len(slots)}")
+    if len(slots) != board.slot_count:
+        raise BlobError(f"need {board.slot_count} slots, got {len(slots)}")
     lock = list(lock)
-    err = lock_error(lock)
+    err = lock_error(lock, board)
     if err:
         raise BlobError(err)
     raws = []
@@ -341,8 +475,8 @@ def parse_blob_header(data: bytes) -> BlobHeader:
     return BlobHeader(version, count, length, crc)
 
 
-def decode_blob(data: bytes) -> Config:
-    """Decode a blob. Any problem yields 9 empty slots with valid=False."""
+def decode_blob(data: bytes, board: Board = DEFAULT_BOARD) -> Config:
+    """Decode a blob. Any problem yields empty slots with valid=False."""
     try:
         header = parse_blob_header(data)
         payload = data[BLOB_HEADER_SIZE:header.total_len]
@@ -363,13 +497,14 @@ def decode_blob(data: bytes) -> Config:
             pos += n
         if pos != len(payload):
             raise BlobError("페이로드 끝에 남는 데이터가 있습니다")
-        lock = list(raws[SLOT_LOCK]) if len(raws) > SLOT_LOCK else []
-        if lock_error(lock):
-            raise BlobError(lock_error(lock))
+        lock = list(raws[board.lock_slot]) if len(raws) > board.lock_slot else []
+        if lock_error(lock, board):
+            raise BlobError(lock_error(lock, board))
     except (BlobError, struct.error) as e:
-        return Config.empty(str(e))
+        return Config.empty(str(e), board)
     # latin-1 never fails; non-ASCII bytes are caught by the validator.
-    # Tolerate a different slot count: keep the first 9, pad with empty.
-    slots = [r.decode("latin-1") for r in raws[:SLOT_COUNT]]
-    slots += [""] * (SLOT_COUNT - len(slots))
+    # Tolerate a different slot count: keep the board's slots, pad with empty.
+    n = board.slot_count
+    slots = [r.decode("latin-1") for r in raws[:n]]
+    slots += [""] * (n - len(slots))
     return Config(slots, valid=True, lock=lock)

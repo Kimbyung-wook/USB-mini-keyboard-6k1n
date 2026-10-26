@@ -104,8 +104,10 @@ class MockDevice(Transport):
     (answer the next N commands after a TEST with BUSY), ``corrupt_next_write``
     (flip a byte of the next WRITE to provoke BAD_CRC), ``flash_error``,
     ``drop_responses`` (swallow the next N responses to provoke timeouts),
-    ``protocol`` (1 = firmware 1.0 without the lock), ``fw`` (major, minor[, patch])
-    and ``build`` (year, month, day, hour, minute; zeros = no build date).
+    ``protocol`` (1 = firmware 1.0 without the lock), ``fw`` (major, minor[, patch]),
+    ``build`` (year, month, day, hour, minute; zeros = no build date) and
+    ``board`` (a Board sent as HELLO board info; None = firmware without it,
+    which the GUI takes for the default 6-key board).
 
     Like the firmware it starts locked when the stored config has a lock
     pattern; ``enter_pattern`` plays the keyboard inputs and ``power_cycle``
@@ -115,8 +117,11 @@ class MockDevice(Transport):
     def __init__(self, capacity: int = 4096, fw: tuple[int, ...] = (0, 1),
                  storage: bytes | None = None, storage_capacity: int | None = None,
                  protocol: int = p.PROTOCOL_VERSION,
-                 build: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0)):
+                 build: tuple[int, int, int, int, int] = (0, 0, 0, 0, 0),
+                 board: p.Board | None = None):
         self.capacity = capacity
+        self.board_info = board
+        self.board = board or p.DEFAULT_BOARD
         self.protocol = protocol
         self.storage_capacity = capacity if storage_capacity is None else storage_capacity
         self.fw = fw
@@ -176,7 +181,7 @@ class MockDevice(Transport):
 
     # Helpers for tests ---------------------------------------------------
     def stored_config(self) -> p.Config:
-        return p.decode_blob(bytes(self.storage))
+        return p.decode_blob(bytes(self.storage), self.board)
 
     def power_cycle(self) -> None:
         """Unplug and plug in again: locks again when a pattern is stored."""
@@ -241,11 +246,12 @@ class MockDevice(Transport):
 
         if cmd == p.Cmd.HELLO:
             info = p.HelloInfo(self.protocol, self.fw[0], self.fw[1],
-                               p.SLOT_COUNT, self.capacity)
+                               self.board.slot_count, self.capacity)
             if self.protocol >= 2:
                 info.lock_flags = self._lock_flags()
                 info.fw_patch = self.fw[2] if len(self.fw) > 2 else 0
                 info.build = self.build
+                info.board_info = self.board_info
             return reply(p.Status.OK, p.encode_hello_result(info))
 
         if self.locked and cmd in (p.Cmd.READ, p.Cmd.TEST, p.Cmd.BOOT):
@@ -292,7 +298,7 @@ class MockDevice(Transport):
                 return reply(p.Status.BAD_ARG)
             if header.crc != crc or p.crc16_ccitt_false(blob[p.BLOB_HEADER_SIZE:]) != crc:
                 return reply(p.Status.BAD_CRC)
-            if not p.decode_blob(blob).valid:
+            if not p.decode_blob(blob, self.board).valid:
                 return reply(p.Status.BAD_ARG)   # e.g. a bad lock pattern
             if self.flash_error:
                 return reply(p.Status.FLASH_ERR)
@@ -306,7 +312,7 @@ class MockDevice(Transport):
 
         if cmd == p.Cmd.TEST:
             slot = a[0]
-            if slot >= p.SLOT_COUNT:
+            if slot >= self.board.slot_count:
                 return reply(p.Status.BAD_ARG)
             self.typed.append(slot)
             self.busy_count = self.busy_after_test

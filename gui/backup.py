@@ -1,4 +1,4 @@
-"""JSON backup of the nine slot strings (format documented in gui/README.md)."""
+"""JSON backup of the slot strings (format documented in gui/README.md)."""
 from __future__ import annotations
 
 import json
@@ -15,19 +15,30 @@ class BackupError(ValueError):
     pass
 
 
-def to_json(slots: list[str]) -> str:
+def to_json(slots: list[str], board: p.Board = p.DEFAULT_BOARD) -> str:
     doc = {
         "format": FORMAT_NAME,
         "version": FORMAT_VERSION,
+        "board": {"name": board.name, "keys": board.keys, "knobs": board.knobs},
         "slots": [
-            {"slot": i, "key": p.SLOT_NAMES[i], "label": p.SLOT_LABELS_KO[i], "macro": text}
+            {"slot": i, "key": board.slot_name(i), "label": board.slot_label(i), "macro": text}
             for i, text in enumerate(slots)
         ],
     }
     return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
 
 
-def from_json(text: str) -> list[str]:
+def from_json(text: str, board: p.Board = p.DEFAULT_BOARD) -> list[str]:
+    return read_json(text, board)[0]
+
+
+def read_json(text: str, board: p.Board = p.DEFAULT_BOARD) -> tuple[list[str], list[str]]:
+    """Slots for this board, and the keys of entries it has no slot for.
+
+    Entries are matched by their "key" name (A, B, …, CW, CCW, PRESS), so a
+    backup of another keyboard keeps whatever slots both have. Files without
+    names fall back to the slot number.
+    """
     try:
         doc = json.loads(text)
     except json.JSONDecodeError as e:
@@ -39,24 +50,37 @@ def from_json(text: str) -> list[str]:
     entries = doc.get("slots")
     if not isinstance(entries, list):
         raise BackupError("slots 목록이 없습니다")
-    slots = [""] * p.SLOT_COUNT
+    names = board.slot_names
+    slots = [""] * board.slot_count
+    skipped: list[str] = []
     for pos, entry in enumerate(entries):
         if not isinstance(entry, dict) or not isinstance(entry.get("macro"), str):
             raise BackupError(f"slots[{pos}] 항목에 macro 문자열이 없습니다")
-        idx = entry.get("slot", pos)
-        if not isinstance(idx, int) or not 0 <= idx < p.SLOT_COUNT:
-            raise BackupError(f"slots[{pos}]의 slot 번호가 올바르지 않습니다 ({idx})")
+        key = entry.get("key")
+        if isinstance(key, str):
+            if key not in names:
+                skipped.append(key)
+                continue
+            idx = names.index(key)
+        else:
+            idx = entry.get("slot", pos)
+            if not isinstance(idx, int) or idx < 0:
+                raise BackupError(f"slots[{pos}]의 slot 번호가 올바르지 않습니다 ({idx})")
+            if idx >= board.slot_count:
+                skipped.append(f"#{idx}")
+                continue
         slots[idx] = normalize_newlines(entry["macro"])
-    return slots
+    return slots, skipped
 
 
-def save(path: str | Path, slots: list[str]) -> None:
-    Path(path).write_text(to_json(slots), encoding="utf-8")
+def save(path: str | Path, slots: list[str], board: p.Board = p.DEFAULT_BOARD) -> None:
+    Path(path).write_text(to_json(slots, board), encoding="utf-8")
 
 
-def load(path: str | Path) -> list[str]:
+def load(path: str | Path, board: p.Board = p.DEFAULT_BOARD) -> tuple[list[str], list[str]]:
+    """Slots and skipped keys, as read_json."""
     try:
         text = Path(path).read_text(encoding="utf-8-sig")
     except OSError as e:
         raise BackupError(f"파일을 읽을 수 없습니다: {e}") from e
-    return from_json(text)
+    return read_json(text, board)

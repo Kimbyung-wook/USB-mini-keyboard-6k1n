@@ -29,42 +29,63 @@ def _preview(text: str, limit: int = 12) -> str:
 
 
 class DeviceView(QFrame):
-    """2x3 keys plus a knob with three actions; clicking selects a slot."""
+    """The keyboard's keys in rows plus each knob with its three actions;
+    clicking selects a slot. Rebuilt by set_board for another keyboard."""
 
     slotSelected = Signal(int)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, board: p.Board = p.DEFAULT_BOARD):
         super().__init__(parent)
         self.setFrameShape(QFrame.StyledPanel)
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
+        self.group.idClicked.connect(self.slotSelected)
         self.buttons: list[QPushButton] = []
+        self.board = board
+        self._layout = QHBoxLayout(self)
+        self._body: QWidget | None = None
+        self.set_board(board)
+
+    def set_board(self, board: p.Board) -> None:
+        if self._body is not None and board == self.board:
+            return
+        self.board = board
+        if self._body is not None:
+            for btn in self.buttons:
+                self.group.removeButton(btn)
+            self._layout.removeWidget(self._body)
+            self._body.setParent(None)    # gone from the screen now, not at the next event loop
+            self._body.deleteLater()
+        self.buttons = []
+        self._body = QWidget()
+        row = QHBoxLayout(self._body)
+        row.setContentsMargins(0, 0, 0, 0)
 
         keys = QGridLayout()
         keys.setSpacing(8)
-        for slot in range(6):
+        small = board.keys > 9
+        for slot in range(board.keys):
             btn = self._make_button(slot)
-            btn.setMinimumSize(96, 72)
-            keys.addWidget(btn, slot // 3, slot % 3)
-
-        knob_box = QVBoxLayout()
-        knob = QLabel("노브")
-        knob.setAlignment(Qt.AlignCenter)
-        knob.setFixedSize(72, 72)
-        knob.setStyleSheet("border: 3px solid palette(mid); border-radius: 36px; font-weight: bold;")
-        knob_box.addWidget(knob, 0, Qt.AlignHCenter)
-        for slot in (p.SLOT_KNOB_CW, p.SLOT_KNOB_CCW, p.SLOT_KNOB_PRESS):
-            btn = self._make_button(slot)
-            btn.setMinimumWidth(150)
-            knob_box.addWidget(btn)
-        knob_box.addStretch(1)
-
-        row = QHBoxLayout(self)
+            btn.setMinimumSize(*((72, 56) if small else (96, 72)))
+            keys.addWidget(btn, slot // board.cols, slot % board.cols)
         row.addLayout(keys, 3)
-        row.addSpacing(16)
-        row.addLayout(knob_box, 1)
 
-        self.group.idClicked.connect(self.slotSelected)
+        for n in range(board.knobs):
+            knob_box = QVBoxLayout()
+            knob = QLabel("노브" if board.knobs == 1 else f"노브 {n + 1}")
+            knob.setAlignment(Qt.AlignCenter)
+            knob.setFixedSize(72, 72)
+            knob.setStyleSheet("border: 3px solid palette(mid); border-radius: 36px; font-weight: bold;")
+            knob_box.addWidget(knob, 0, Qt.AlignHCenter)
+            for action in range(3):
+                btn = self._make_button(board.knob_slot(n, action))
+                btn.setMinimumWidth(150)
+                knob_box.addWidget(btn)
+            knob_box.addStretch(1)
+            row.addSpacing(16)
+            row.addLayout(knob_box, 1)
+
+        self._layout.addWidget(self._body)
         self.buttons[0].setChecked(True)
 
     def _make_button(self, slot: int) -> QPushButton:
@@ -79,17 +100,17 @@ class DeviceView(QFrame):
         self.buttons[slot].setChecked(True)
 
     def update_slot(self, slot: int, text: str, modified: bool, has_error: bool) -> None:
-        name = p.SLOT_NAMES[slot] if slot < 6 else {
-            p.SLOT_KNOB_CW: "↻ 시계 방향",
-            p.SLOT_KNOB_CCW: "↺ 반시계 방향",
-            p.SLOT_KNOB_PRESS: "● 누르기",
-        }[slot]
+        knob = self.board.knob_of(slot)
+        if knob is None:
+            name = self.board.key_name(slot)
+        else:
+            name = f"{p.KNOB_SYMBOLS[knob[1]]} {p.KNOB_ACTIONS_KO[knob[1]]}"
         mark = " *" if modified else ""
         preview = _preview(text) if text else "(비어 있음)"
         length = macro.stored_length(text)  # bytes it takes in the device, macro text included
         btn = self.buttons[slot]
         btn.setText(f"{name}{mark} · {length}자\n{preview}")
-        btn.setToolTip(f"{p.SLOT_LABELS_KO[slot]} · {length}자"
+        btn.setToolTip(f"{self.board.slot_label(slot)} · {length}자"
                        f"{' (저장 안 됨)' if modified else ''}")
         font = btn.font()
         font.setBold(modified)
@@ -149,6 +170,7 @@ class MacroEditor(QWidget):
 
         self.errors: list[macro.MacroError] = []
         self._loading = False
+        self.board = p.DEFAULT_BOARD     # for slot labels; set by the main window
 
     def _menu_button(self, label: str, items: list[str]) -> QToolButton:
         b = QToolButton()
@@ -161,7 +183,7 @@ class MacroEditor(QWidget):
         return b
 
     def set_slot(self, slot: int, text: str) -> None:
-        self.title.setText(f"{p.SLOT_LABELS_KO[slot]} 편집")
+        self.title.setText(f"{self.board.slot_label(slot)} 편집")
         self._loading = True
         try:
             self.edit.setPlainText(text)
@@ -227,13 +249,14 @@ LOCK_HELP = (
 
 
 class LockPatternEditor(QGroupBox):
-    """Builds the lock pattern from the nine key/knob inputs."""
+    """Builds the lock pattern from the keyboard's key/knob inputs."""
 
     patternChanged = Signal(list)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, board: p.Board = p.DEFAULT_BOARD):
         super().__init__("패턴 암호", parent)
         self.steps: list[int] = []
+        self.board = board
 
         self.display = QLabel()
         self.display.setStyleSheet("font-weight: bold; font-size: 14px;")
@@ -242,15 +265,9 @@ class LockPatternEditor(QGroupBox):
         inputs = QHBoxLayout()
         inputs.setSpacing(4)
         inputs.addWidget(QLabel("추가:"))
+        self._inputs = inputs
         self.input_buttons: list[QToolButton] = []
-        for slot in range(p.SLOT_COUNT):
-            b = QToolButton()
-            b.setText(p.LOCK_STEP_NAMES[slot])
-            b.setToolTip(p.SLOT_LABELS_KO[slot])
-            b.setMinimumWidth(32)
-            b.clicked.connect(lambda _=False, s=slot: self.add_step(s))
-            inputs.addWidget(b)
-            self.input_buttons.append(b)
+        self._make_inputs()
         self.back_btn = QToolButton()
         self.back_btn.setText("⌫ 한 칸 지우기")
         self.back_btn.clicked.connect(self.remove_last)
@@ -277,6 +294,29 @@ class LockPatternEditor(QGroupBox):
         lay.addWidget(help_label)
         self._refresh()
 
+    def _make_inputs(self) -> None:
+        for slot in range(self.board.slot_count):
+            b = QToolButton()
+            b.setText(self.board.step_name(slot))
+            b.setToolTip(self.board.slot_label(slot))
+            b.setMinimumWidth(32)
+            b.clicked.connect(lambda _=False, s=slot: self.add_step(s))
+            self._inputs.insertWidget(1 + slot, b)    # after the "추가:" label
+            self.input_buttons.append(b)
+
+    def set_board(self, board: p.Board) -> None:
+        """One input button per slot of this keyboard; the pattern is cleared."""
+        if board == self.board:
+            return
+        self.board = board
+        for b in self.input_buttons:
+            self._inputs.removeWidget(b)
+            b.setParent(None)
+            b.deleteLater()
+        self.input_buttons = []
+        self._make_inputs()
+        self.set_pattern([])
+
     def pattern(self) -> list[int]:
         return list(self.steps)
 
@@ -302,8 +342,8 @@ class LockPatternEditor(QGroupBox):
 
     def _refresh(self) -> None:
         n = len(self.steps)
-        self.display.setText(p.lock_text(self.steps) if n else "(없음 · 잠금 안 씀)")
-        err = p.lock_error(self.steps)
+        self.display.setText(p.lock_text(self.steps, self.board) if n else "(없음 · 잠금 안 씀)")
+        err = p.lock_error(self.steps, self.board)
         if err:
             self.status.setStyleSheet("color: #c62828;")
             self.status.setText(f"{n}단계 · {p.LOCK_MIN_STEPS}단계 이상 필요")

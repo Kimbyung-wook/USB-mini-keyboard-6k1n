@@ -42,8 +42,9 @@ class MainWindow(QMainWindow):
 
         self._connect_fn = connect_fn
         self.client: DeviceClient | None = None
-        self.slots: list[str] = [""] * p.SLOT_COUNT
-        self.baseline: list[str] = [""] * p.SLOT_COUNT   # what the device holds
+        self.board = p.DEFAULT_BOARD     # layout of the connected (or last) keyboard
+        self.slots: list[str] = [""] * self.board.slot_count
+        self.baseline: list[str] = [""] * self.board.slot_count   # what the device holds
         self.lock: list[int] = []
         self.lock_baseline: list[int] = []
         self.current = 0
@@ -179,7 +180,7 @@ class MainWindow(QMainWindow):
         return self.lock != self.lock_baseline
 
     def has_unsaved(self) -> bool:
-        return self.lock_modified() or any(self.is_modified(i) for i in range(p.SLOT_COUNT))
+        return self.lock_modified() or any(self.is_modified(i) for i in range(len(self.slots)))
 
     def blob_size(self) -> int:
         return p.blob_size(self.slots, self.lock)
@@ -188,7 +189,7 @@ class MainWindow(QMainWindow):
         return [i for i, s in enumerate(self.slots) if not macro.parse(s).ok]
 
     def _refresh_all(self) -> None:
-        for i in range(p.SLOT_COUNT):
+        for i in range(len(self.slots)):
             self._refresh_slot(i)
         self.lock_editor.set_pattern(self.lock)
         self.lock_editor.set_modified(self.lock_modified())
@@ -203,7 +204,8 @@ class MainWindow(QMainWindow):
         used, cap = self.blob_size(), self.capacity
         # Every stored character costs one byte (macro text like {ENTER} counts as typed);
         # the rest of the blob is the fixed header and slot lengths.
-        chars = p.blob_size(self.slots) - p.blob_size([""] * p.SLOT_COUNT)
+        fixed = p.blob_size([""] * len(self.slots))
+        chars = p.blob_size(self.slots) - fixed
         self.capacity_bar.setMaximum(cap)
         self.capacity_bar.setValue(min(used, cap))
         suffix = "" if self.connected else " (장치 미연결, 기본값 기준)"
@@ -216,9 +218,9 @@ class MainWindow(QMainWindow):
                 f"{chars}자 입력 · {cap - used}자 더 입력 가능 ({used} / {cap} 바이트){suffix}")
             self.capacity_bar.setStyleSheet("")
         self.capacity_bar.setToolTip(
-            "9개 슬롯 전체의 글자 수입니다. {ENTER} 같은 매크로 표기도 쓴 글자 수만큼 차지합니다.\n"
-            f"헤더와 슬롯 길이 정보로 {p.blob_size([''] * p.SLOT_COUNT)}바이트가 고정으로 쓰입니다."
-            + (f"\n패턴 암호가 {used - chars - p.blob_size([''] * p.SLOT_COUNT)}바이트를 씁니다."
+            f"{len(self.slots)}개 슬롯 전체의 글자 수입니다. {{ENTER}} 같은 매크로 표기도 쓴 글자 수만큼 차지합니다.\n"
+            f"헤더와 슬롯 길이 정보로 {fixed}바이트가 고정으로 쓰입니다."
+            + (f"\n패턴 암호가 {used - chars - fixed}바이트를 씁니다."
                if self.lock else ""))
         self._refresh_buttons()
 
@@ -226,7 +228,9 @@ class MainWindow(QMainWindow):
         if self.connected:
             info = self.client.info
             src = self.client.transport.description if self.client.transport else ""
-            head = f"({src}) · {info.fw_text} · 용량 {info.capacity}바이트"
+            board = (f" · {info.board.name} ({info.board.summary})"
+                     if info.board_info is not None else "")
+            head = f"({src}){board} · {info.fw_text} · 용량 {info.capacity}바이트"
             if info.blocked:
                 self.conn_label.setText(f"🔒 잠김 {head} — 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요")
                 self.conn_label.setStyleSheet("font-weight: bold; color: #c62828;")
@@ -248,7 +252,7 @@ class MainWindow(QMainWindow):
         unlocked = on and not self.device_locked
         self.read_btn.setEnabled(unlocked)
         self.save_btn.setEnabled(on and self.blob_size() <= self.capacity
-                                 and p.lock_error(self.lock) is None)
+                                 and p.lock_error(self.lock, self.board) is None)
         self.test_btn.setEnabled(unlocked and self._countdown == 0)
         self.refresh_btn.setEnabled(True)
         # Nothing to show or edit without a keyboard (see clear_config)
@@ -287,6 +291,24 @@ class MainWindow(QMainWindow):
         self._refresh_capacity()
         self._update_title()
 
+    def set_board(self, board: p.Board) -> None:
+        """Rebuild the key/knob picture and the pattern buttons for another
+        keyboard; the slots on screen are emptied (they belong to the old one)."""
+        if board == self.board:
+            return
+        self.board = board
+        self.device_view.set_board(board)
+        self.lock_editor.set_board(board)
+        self.editor.board = board
+        self.current = 0
+        self.slots = [""] * board.slot_count
+        self.baseline = [""] * board.slot_count
+        self.lock = []
+        self.lock_baseline = []
+        self.editor.set_slot(0, "")
+        self._refresh_all()
+        self._update_title()
+
     def _load_slots(self, slots: list[str], lock: list[int] | None = None, *,
                     from_device: bool) -> None:
         """Load slot texts; lock None keeps the current pattern (JSON has none)."""
@@ -322,7 +344,13 @@ class MainWindow(QMainWindow):
             if not quiet:
                 self.error("연결 실패", str(e))
             return False
+        if client.info.board != self.board and self.has_unsaved() and not self.ask(
+                "다른 키보드", f"배치가 다른 키보드({client.info.board.summary})가 연결되었습니다.\n"
+                "화면의 저장하지 않은 편집 내용을 지우고 이 키보드로 바꿀까요?"):
+            client.close()
+            return False
         self.client = client
+        self.set_board(client.info.board)
         self._refresh_all()
         self.statusBar().showMessage("장치에 연결했습니다", 3000)
         if client.info.locked:
@@ -347,8 +375,8 @@ class MainWindow(QMainWindow):
         cleared when it is disconnected or locks again, and read from the
         device again afterwards.
         """
-        self.slots = [""] * p.SLOT_COUNT
-        self.baseline = [""] * p.SLOT_COUNT
+        self.slots = [""] * self.board.slot_count
+        self.baseline = [""] * self.board.slot_count
         self.lock = []
         self.lock_baseline = []
         self.editor.set_slot(self.current, "")
@@ -441,11 +469,11 @@ class MainWindow(QMainWindow):
             return False
         bad = self.invalid_slots()
         if bad:
-            names = ", ".join(p.SLOT_LABELS_KO[i] for i in bad)
+            names = ", ".join(self.board.slot_label(i) for i in bad)
             self.error("저장할 수 없음", f"문법 오류가 있는 슬롯이 있습니다: {names}\n오류를 고친 뒤 다시 저장하세요.")
             self.select_slot(bad[0])
             return False
-        lock_err = p.lock_error(self.lock)
+        lock_err = p.lock_error(self.lock, self.board)
         if lock_err:
             self.error("저장할 수 없음", f"{lock_err}.\n패턴을 고치거나 모두 지운 뒤 다시 저장하세요.")
             return False
@@ -457,10 +485,11 @@ class MainWindow(QMainWindow):
         if was_locked:
             question = ("장치가 잠겨 있어 저장된 설정을 읽지 못했습니다.\n"
                         "저장하면 장치의 기존 문자열과 패턴 암호를 모두 지우고 지금 화면의 내용으로 바꿉니다.\n\n"
-                        f"9개 슬롯 전체({size}바이트)를 저장할까요?")
+                        f"{len(self.slots)}개 슬롯 전체({size}바이트)를 저장할까요?")
         else:
-            question = f"9개 슬롯 전체({size}바이트)를 장치에 저장할까요?"
-        lock_note = f"\n패턴 암호: {p.lock_text(self.lock)}" if self.lock else "\n패턴 암호: 없음"
+            question = f"{len(self.slots)}개 슬롯 전체({size}바이트)를 장치에 저장할까요?"
+        lock_note = (f"\n패턴 암호: {p.lock_text(self.lock, self.board)}" if self.lock
+                     else "\n패턴 암호: 없음")
         if confirm and not self.ask("장치에 저장", question + lock_note):
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -489,7 +518,7 @@ class MainWindow(QMainWindow):
             self.error("테스트 입력", "장치가 연결되어 있지 않습니다")
             return False
         slot = self.current
-        msg = (f"{p.SLOT_LABELS_KO[slot]}의 문자열을 장치가 실제로 타이핑합니다.\n"
+        msg = (f"{self.board.slot_label(slot)}의 문자열을 장치가 실제로 타이핑합니다.\n"
                f"{TEST_COUNTDOWN_S}초 안에 입력받을 창(예: 메모장)을 클릭해 포커스를 옮기세요.")
         if self.is_modified(slot):
             msg += "\n\n주의: 이 슬롯은 아직 저장하지 않았습니다. 장치에 저장된 내용이 입력됩니다."
@@ -525,7 +554,7 @@ class MainWindow(QMainWindow):
         except DeviceError as e:
             self._handle_device_error("테스트 입력 실패", e)
             return False
-        self.statusBar().showMessage(f"{p.SLOT_LABELS_KO[slot]} 테스트 입력을 보냈습니다", 4000)
+        self.statusBar().showMessage(f"{self.board.slot_label(slot)} 테스트 입력을 보냈습니다", 4000)
         return True
 
     # ------------------------------------------------------------ JSON backup
@@ -537,7 +566,7 @@ class MainWindow(QMainWindow):
         if not path:
             return False
         try:
-            backup.save(path, self.slots)
+            backup.save(path, self.slots, self.board)
         except OSError as e:
             self.error("내보내기 실패", str(e))
             return False
@@ -552,11 +581,13 @@ class MainWindow(QMainWindow):
         if not path:
             return False
         try:
-            slots = backup.load(path)
+            slots, skipped = backup.load(path, self.board)
         except backup.BackupError as e:
             self.error("불러오기 실패", str(e))
             return False
         self._load_slots(slots, from_device=False)
+        if skipped:
+            self.inform("불러오기", "이 키보드에 없는 슬롯은 건너뛰었습니다: " + ", ".join(skipped))
         self.statusBar().showMessage("불러왔습니다. 장치에 반영하려면 [장치에 저장]을 누르세요", 6000)
         return True
 
@@ -626,9 +657,20 @@ def make_mock_connector(mock: MockDevice) -> Callable[[], Transport]:
     return connect
 
 
-def build_window(use_mock: bool) -> MainWindow:
+def parse_board(text: str) -> p.Board:
+    """'12x2' (keys x knobs) or '12x2x3' (… x rows) for --mock-board."""
+    parts = [int(x) for x in text.lower().split("x")]
+    keys, knobs = parts[0], parts[1] if len(parts) > 1 else 1
+    rows = parts[2] if len(parts) > 2 else (1 if keys <= 4 else 2 if keys <= 8 else 3)
+    return p.Board(keys=keys, knobs=knobs, rows=rows, name=f"MOCK{keys}K{knobs}N")
+
+
+def build_window(use_mock: bool, mock_board: p.Board | None = None) -> MainWindow:
     if use_mock:
-        mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS))
+        if mock_board is None:
+            mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS))
+        else:
+            mock = MockDevice(capacity=DEFAULT_CAPACITY, board=mock_board)
         return MainWindow(make_mock_connector(mock), auto_reconnect=False, mock_label="모의 장치")
     return MainWindow(HidTransport.open_first, auto_reconnect=True)
 
@@ -636,9 +678,11 @@ def build_window(use_mock: bool) -> MainWindow:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=APP_TITLE)
     parser.add_argument("--mock", action="store_true", help="실제 장치 대신 모의 장치 사용")
+    parser.add_argument("--mock-board", metavar="KxN[xR]", type=parse_board,
+                        help="모의 장치의 배치: 키 K개, 노브 N개, R행 (예: 12x2). --mock과 함께")
     args, qt_args = parser.parse_known_args(argv)
     app = QApplication([sys.argv[0], *qt_args])
-    win = build_window(args.mock)
+    win = build_window(args.mock or args.mock_board is not None, args.mock_board)
     win.show()
     if args.mock:
         QTimer.singleShot(0, win.connect_device)

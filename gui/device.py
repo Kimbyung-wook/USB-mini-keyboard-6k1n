@@ -109,14 +109,19 @@ class DeviceClient:
     # ---------------------------------------------------------- commands
     def hello(self) -> p.HelloInfo:
         resp = self._request(p.Cmd.HELLO)
-        info = p.parse_hello_result(resp.result)
+        try:
+            info = p.parse_hello_result(resp.result)
+        except p.BoardInfoError as e:
+            raise IncompatibleDeviceError(f"장치의 보드 정보가 올바르지 않습니다: {e}") from e
         if info.protocol_version not in p.SUPPORTED_PROTOCOL_VERSIONS:
             raise IncompatibleDeviceError(
                 f"지원하지 않는 프로토콜 버전입니다 (장치 v{info.protocol_version}, "
                 f"프로그램 v{p.PROTOCOL_VERSION}). 펌웨어 또는 프로그램을 업데이트하세요")
-        if info.slot_count != p.SLOT_COUNT:
+        board = info.board
+        if info.slot_count != board.slot_count:
             raise IncompatibleDeviceError(
-                f"슬롯 수가 맞지 않습니다 (장치 {info.slot_count}개, 예상 {p.SLOT_COUNT}개)")
+                f"슬롯 수가 맞지 않습니다 (장치 {info.slot_count}개, "
+                f"{board.summary} 배치라면 {board.slot_count}개)")
         self.info = info
         return info
 
@@ -152,16 +157,17 @@ class DeviceClient:
         return bytes(blob[:total])
 
     def read_config(self, progress: Progress | None = None) -> p.Config:
-        return p.decode_blob(self.read_blob(progress))
+        board = self._require_info().board
+        return p.decode_blob(self.read_blob(progress), board)
 
     def write_config(self, slots: list[str], progress: Progress | None = None,
                      check_capacity: bool = True, lock: list[int] | tuple[int, ...] = ()) -> int:
         """WRITE the encoded blob in chunks, then COMMIT. Returns blob size."""
+        info = self._require_info()
         try:
-            blob = p.encode_blob(slots, lock)
+            blob = p.encode_blob(slots, lock, info.board)
         except p.BlobError as e:
             raise DeviceError(f"설정을 만들 수 없습니다: {e}") from e
-        info = self._require_info()
         if lock and not info.supports_lock:
             raise DeviceError(f"펌웨어 v{info.fw_version}은 패턴 암호를 지원하지 않습니다. "
                               "펌웨어를 업데이트하거나 패턴 암호를 지우세요")
@@ -180,7 +186,7 @@ class DeviceClient:
         return len(blob)
 
     def test(self, slot: int) -> None:
-        if not 0 <= slot < p.SLOT_COUNT:
+        if not 0 <= slot < self._require_info().board.slot_count:
             raise ValueError(f"slot out of range: {slot}")
         self._request(p.Cmd.TEST, p.test_args(slot), retry_busy=False)
 
