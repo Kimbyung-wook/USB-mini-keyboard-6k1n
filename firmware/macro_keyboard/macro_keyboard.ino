@@ -88,6 +88,19 @@ __idata uint8_t pressFlash;
 __idata uint16_t pressAt;
 __idata uint16_t blinkAt; // start of the current locked blink period
 
+// millis() read once per loop(): one 32-bit read instead of one per use
+__data uint16_t now16;
+
+// R, G, B per COLOR_* value
+__code uint8_t colorRGB[][3] = {
+    {0, 0, 0},    // COLOR_OFF
+    {0, 0, 40},   // COLOR_IDLE
+    {0, 40, 0},   // COLOR_TYPING
+    {40, 40, 40}, // COLOR_SAVED
+    {40, 0, 40},  // COLOR_BOOT
+    {40, 0, 0},   // COLOR_RED
+};
+
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
   // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
   __xdata uint8_t *p = ledData;
@@ -101,48 +114,33 @@ void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
 void showColor(uint8_t color) {
   // Resend periodically even without a change, so a frame lost at power-up
   // does not leave the LED dark
-  if (color == ledColor &&
-      (uint16_t)((uint16_t)millis() - ledSentAt) < LED_REFRESH_MS) {
+  if (color == ledColor && (uint16_t)(now16 - ledSentAt) < LED_REFRESH_MS) {
     return;
   }
   ledColor = color;
-  if (color == COLOR_IDLE) {
-    fillLeds(0, 0, 40);
-  } else if (color == COLOR_TYPING) {
-    fillLeds(0, 40, 0);
-  } else if (color == COLOR_SAVED) {
-    fillLeds(40, 40, 40);
-  } else if (color == COLOR_BOOT) {
-    fillLeds(40, 0, 40);
-  } else if (color == COLOR_RED) {
-    fillLeds(40, 0, 0);
-  } else {
-    fillLeds(0, 0, 0);
-  }
+  fillLeds(colorRGB[color][0], colorRGB[color][1], colorRGB[color][2]);
   neopixel_show_P3_4(ledData, NUM_LEDS * 3);
-  ledSentAt = (uint16_t)millis();
+  ledSentAt = now16;
 }
 
 void updateLed() {
   if (savedFlash) {
-    if ((uint16_t)((uint16_t)millis() - savedAt) < SAVED_FLASH_MS) {
+    if ((uint16_t)(now16 - savedAt) < SAVED_FLASH_MS) {
       showColor(COLOR_SAVED);
       return;
     }
     savedFlash = 0;
   }
-  if (pressFlash &&
-      (uint16_t)((uint16_t)millis() - pressAt) >= PRESS_FLASH_MS) {
+  if (pressFlash && (uint16_t)(now16 - pressAt) >= PRESS_FLASH_MS) {
     pressFlash = 0;
   }
   if (lock_state() == LOCK_BLOCKED) {
-    showColor(((uint16_t)millis() >> BLOCKED_BLINK_SHIFT) & 1 ? COLOR_OFF
-                                                               : COLOR_RED);
+    showColor((now16 >> BLOCKED_BLINK_SHIFT) & 1 ? COLOR_OFF : COLOR_RED);
   } else if (lock_entering()) {
     showColor(COLOR_RED);
   } else if (lock_state() == LOCK_LOCKED) {
     // 16-bit period counter instead of millis() % period (32-bit modulo)
-    uint16_t sinceBlink = (uint16_t)millis() - blinkAt;
+    uint16_t sinceBlink = now16 - blinkAt;
     if (sinceBlink >= LOCKED_BLINK_PERIOD) {
       blinkAt += sinceBlink; // restart the period now, also after a long gap
       sinceBlink = 0;
@@ -175,7 +173,7 @@ void onInput(uint8_t slot) {
   } else if (lock_state() == LOCK_OPEN) {
     macro_enqueue(slot);
     pressFlash = 1; // green even for an empty slot
-    pressAt = (uint16_t)millis();
+    pressAt = now16;
   }
 }
 
@@ -184,13 +182,13 @@ void onInput(uint8_t slot) {
 __idata uint8_t knobHeld; // a press still waiting for release or the hold time
 __idata uint16_t knobDownAt;
 
-void knobDown(uint16_t now) {
+void knobDown() {
   if (lock_entering() || !storage_lock_len()) {
     onInput(SLOT_KNOB_PRESS);
     return;
   }
   knobHeld = 1;
-  knobDownAt = now;
+  knobDownAt = now16;
 }
 
 void knobUp() {
@@ -200,8 +198,8 @@ void knobUp() {
   }
 }
 
-void checkKnobHold(uint16_t now) {
-  if (knobHeld && (uint16_t)(now - knobDownAt) >= LOCK_HOLD_MS) {
+void checkKnobHold() {
+  if (knobHeld && (uint16_t)(now16 - knobDownAt) >= LOCK_HOLD_MS) {
     knobHeld = 0;
     lock_start_entry();
   }
@@ -213,20 +211,18 @@ uint8_t readEncoder() {
 }
 
 void scanKeys() {
-  uint16_t now = (uint16_t)millis();
-
   for (uint8_t i = 0; i < NUM_KEYS; i++) {
     uint8_t pressed = !((i < P1_KEYS ? P1 : P3) & keyBits[i]);
 
     if (pressed != keyLast[i]) {
       keyLast[i] = pressed;
-      keyChangedAt[i] = now;
+      keyChangedAt[i] = now16;
     } else if (pressed != keyStable[i] &&
-               (uint16_t)(now - keyChangedAt[i]) >= DEBOUNCE_MS) {
+               (uint16_t)(now16 - keyChangedAt[i]) >= DEBOUNCE_MS) {
       keyStable[i] = pressed;
       if (i == KNOB_KEY) {
         if (pressed) {
-          knobDown(now);
+          knobDown();
         } else {
           knobUp();
         }
@@ -235,7 +231,7 @@ void scanKeys() {
       }
     }
   }
-  checkKnobHold(now);
+  checkKnobHold();
 }
 
 void scanEncoder() {
@@ -273,11 +269,15 @@ void setup() {
   lock_init();
   encPrev = readEncoder();
   USBInit();
+  now16 = (uint16_t)millis();
   updateLed();
 }
 
 void loop() {
-  uint8_t event = protocol_poll();
+  uint8_t event;
+
+  now16 = (uint16_t)millis();
+  event = protocol_poll();
 
   if (event == PROTO_EVT_BOOT) {
     // Give the host a moment to collect the OK response
@@ -287,7 +287,7 @@ void loop() {
     jumpToBootloader();
   } else if (event == PROTO_EVT_SAVED) {
     savedFlash = 1;
-    savedAt = (uint16_t)millis();
+    savedAt = now16;
   }
 
   scanEncoder();
