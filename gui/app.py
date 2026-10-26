@@ -17,6 +17,7 @@ from . import protocol as p
 from .device import DeviceClient, DeviceError, DeviceStatusError, NotConnectedError
 from .transport import HidTransport, MockDevice, Transport, TransportError
 from .version import VERSION, version_text
+from .flash_dialog import FirmwareDialog
 from .widgets import DeviceView, LockPatternEditor, MacroEditor
 
 APP_TITLE = "매크로 키보드 설정 (6키 + 노브)"
@@ -47,6 +48,9 @@ class MainWindow(QMainWindow):
         self.lock_baseline: list[int] = []
         self.current = 0
         self._countdown = 0
+        self._flashing = False
+        self._mock = bool(mock_label)
+        self.flash_command_fn = None   # uploader command override (tests)
 
         self._build_ui()
         self._refresh_all()
@@ -76,8 +80,8 @@ class MainWindow(QMainWindow):
         self.refresh_btn.setToolTip("장치 상태를 다시 확인합니다")
         self.refresh_btn.clicked.connect(self.refresh_status)
         self.flash_btn = QPushButton("펌웨어 업데이트")
-        self.flash_btn.setEnabled(False)
-        self.flash_btn.setToolTip("준비 중인 기능입니다")
+        self.flash_btn.setToolTip("새 펌웨어(.hex)를 키보드에 올립니다")
+        self.flash_btn.clicked.connect(self.update_firmware)
         conn.addWidget(self.conn_label, 1)
         conn.addWidget(self.connect_btn)
         conn.addWidget(self.refresh_btn)
@@ -378,7 +382,7 @@ class MainWindow(QMainWindow):
     def _poll_device(self) -> None:
         """Auto-reconnect when a keyboard appears; notice when it is unplugged,
         unlocked or locked again (holding the knob on the keyboard)."""
-        if self._countdown:
+        if self._countdown or self._flashing:
             return
         if not self.connected:
             self.connect_device(quiet=True)
@@ -555,6 +559,50 @@ class MainWindow(QMainWindow):
         self._load_slots(slots, from_device=False)
         self.statusBar().showMessage("불러왔습니다. 장치에 반영하려면 [장치에 저장]을 누르세요", 6000)
         return True
+
+    # ------------------------------------------------------------ firmware update
+    def prepare_bootloader(self) -> str:
+        """Put the keyboard in the bootloader if the GUI can; return what to tell the user."""
+        if self.connected and not self.device_locked:
+            try:
+                self.client.reboot_to_bootloader()   # closes the client
+            except DeviceError as e:
+                self.disconnect_device()
+                return (f"업데이트 모드로 바꾸지 못했습니다 ({e}). "
+                        "키보드를 뽑았다가 키 D를 누른 채 다시 꽂으세요")
+            self.client = None
+            self.clear_config()
+            return "키보드를 업데이트 모드로 바꿨습니다. 잠시 기다리세요 (보라색 LED)"
+        reason = "잠겨 있어서" if self.connected else "연결되어 있지 않아서"
+        if self.connected:
+            self.disconnect_device()
+        return (f"키보드가 {reason} 자동으로 업데이트 모드로 바꿀 수 없습니다. "
+                "키보드를 뽑았다가 키 D를 누른 채 다시 꽂으세요")
+
+    def make_firmware_dialog(self) -> FirmwareDialog:
+        return FirmwareDialog(self.prepare_bootloader, self.flash_command_fn, self)
+
+    def update_firmware(self) -> bool:
+        if self._mock:
+            self.inform("펌웨어 업데이트", "모의 장치에서는 펌웨어를 올릴 수 없습니다.")
+            return False
+        if self.has_unsaved() and not self.ask(
+                "펌웨어 업데이트",
+                "저장하지 않은 편집 내용이 있습니다. 펌웨어를 올리면 화면의 편집 내용이 지워집니다.\n계속할까요?"):
+            return False
+        self._flashing = True
+        try:
+            dlg = self.make_firmware_dialog()
+            dlg.exec()
+            ok = dlg.succeeded
+        finally:
+            self._flashing = False
+        if ok:
+            self.statusBar().showMessage("펌웨어를 올렸습니다. 키보드에 다시 연결합니다", 5000)
+            QTimer.singleShot(2000, lambda: self.connect_device(quiet=True))
+        elif not self.connected:
+            self._refresh_all()
+        return ok
 
     # ------------------------------------------------------------ closing
     def closeEvent(self, event: QCloseEvent) -> None:

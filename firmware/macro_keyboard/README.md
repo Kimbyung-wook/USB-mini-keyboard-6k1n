@@ -79,7 +79,9 @@ powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 
 ## 업로드
 
-저장소 폴더에서 실행하고, **키 D를 누른 채** 키보드를 연결합니다. `build_fw.ps1`로 빌드했으면:
+이 펌웨어(v1.0 이상)가 이미 올라가 있으면 **GUI의 [펌웨어 업데이트]**로 올리는 것이 가장 쉽습니다. 잠금이 풀린 키보드는 GUI가 BOOT 명령으로 업데이트 모드에 넣어 주므로 키 D를 누를 필요가 없습니다([사용 설명서 8장](../../docs/MANUAL.md#8-펌웨어-업데이트)).
+
+스크립트로 올릴 때는 저장소 폴더에서 실행하고, **키 D를 누른 채** 키보드를 연결합니다. `build_fw.ps1`로 빌드했으면:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\flash.ps1 -Hex firmware\macro_keyboard\build\macro_keyboard.ino.hex

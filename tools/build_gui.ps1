@@ -8,6 +8,10 @@
   running from source keeps showing "개발 실행". The version itself is
   VERSION in gui\version.py.
 
+  The firmware uploader (CH55xDuino's vnproch55x.exe with its DLLs, LGPL-2.1;
+  CH375DLL.dll is WCH's driver DLL) is bundled from the newest installed
+  MCS51Tools, so [펌웨어 업데이트] works on a PC without Arduino.
+
   Needs the GUI venv (gui\.venv) with PyInstaller installed:
     gui\.venv\Scripts\python -m pip install pyinstaller
 
@@ -34,10 +38,23 @@ $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm'
 
 $mode = if ($OneDir) { '--onedir' } else { '--onefile' }
 
+# Uploader for [펌웨어 업데이트], found by gui/flasher.py under uploader\
+$toolsRoot = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\CH55xDuino\tools\MCS51Tools'
+$toolDir = Get-ChildItem $toolsRoot -Directory -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending | Select-Object -First 1
+if (-not $toolDir) { throw "CH55xDuino MCS51Tools not found under $toolsRoot (needed for the uploader)" }
+$uploaderFiles = 'vnproch55x.exe', 'CH375DLL.dll', 'libusb-1.0.dll', 'libusbK.dll', 'libgcc_s_sjlj-1.dll'
+$binaries = foreach ($f in $uploaderFiles) {
+    $src = Join-Path $toolDir.FullName "win\$f"
+    if (-not (Test-Path $src)) { throw "uploader file missing: $src" }
+    '--add-binary'
+    "$src;uploader"
+}
+
 Push-Location $root
 try {
     & $python -m PyInstaller --noconfirm $mode --windowed --name MacroKeyboardConfig `
-        --paths . --hidden-import gui._build_info gui\main.py
+        --paths . --hidden-import gui._build_info @binaries gui\main.py
     $code = $LASTEXITCODE
 } finally {
     Pop-Location
