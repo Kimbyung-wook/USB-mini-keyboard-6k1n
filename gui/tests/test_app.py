@@ -77,6 +77,12 @@ def test_invalid_slot_blocks_save(win):
     assert win.dialogs[-1][0] == "error"
 
 
+def test_version_shown(win):
+    from gui.version import VERSION, version_text
+    assert f"v{VERSION}" in win.windowTitle()
+    assert win.version_label.text() == version_text()
+
+
 def test_slot_buttons_show_length(win):
     win.connect_device()
     assert f"· {len(SAMPLE_SLOTS[0])}자" in win.device_view.buttons[0].text()

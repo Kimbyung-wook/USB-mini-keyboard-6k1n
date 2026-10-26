@@ -5,6 +5,8 @@ firmware/**/build/
 /build/
 /dist/
 *.spec
+# written by tools/build_gui.ps1 during a build
+gui/_build_info.py
 
 # Python
 __pycache__/

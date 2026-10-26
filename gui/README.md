@@ -40,6 +40,26 @@ cd gui
 
 UI 테스트는 화면 없이(`QT_QPA_PLATFORM=offscreen`) 실행됩니다.
 
+## 실행 파일(exe) 빌드
+
+저장소 폴더에서 실행합니다. 처음 한 번은 PyInstaller를 설치합니다.
+
+```powershell
+gui\.venv\Scripts\python -m pip install pyinstaller
+powershell -ExecutionPolicy Bypass -File tools\build_gui.ps1
+```
+
+- 결과: `dist\MacroKeyboardConfig.exe` (Python 없는 PC에서도 실행 가능)
+- `-OneDir`을 붙이면 파일 하나 대신 폴더(`dist\MacroKeyboardConfig\`)로 만들어서 더 빨리 실행됩니다.
+- `dist\`, `build\`, `*.spec`은 빌드 중간/결과 파일이라 git에서 제외됩니다.
+
+### 버전과 빌드 일자
+
+- 창 제목에 `v1.0.0`이, 상태 표시줄 오른쪽에 `GUI v1.0.0 · 빌드 2026-10-26 09:06`처럼 표시됩니다.
+- **버전**은 `gui/version.py`의 `VERSION`을 직접 고칩니다.
+- **빌드 일자**는 `tools/build_gui.ps1`이 빌드하는 순간의 시각을 `gui/_build_info.py`에 써서 exe에 넣고, 빌드가 끝나면 이 파일을 지웁니다. 그래서 소스에서 바로 실행하면 `개발 실행 (빌드 전)`으로 표시됩니다.
+- PyInstaller를 직접 실행하면 빌드 일자가 들어가지 않으니 꼭 `build_gui.ps1`로 빌드하세요.
+
 ## 기능
 
 - **연결 막대**: 연결 상태(연결 안 됨 / 연결됨 + 펌웨어 버전 + 저장 용량), [연결]/[연결 끊기], [새로고침].
@@ -105,12 +125,13 @@ UTF-8 JSON 파일입니다.
 | `device.py` | 장치 클라이언트: HELLO / READ / WRITE + COMMIT / TEST / BOOT, 시간 제한, 오류 처리 |
 | `backup.py` | JSON 백업 읽기/쓰기 |
 | `widgets.py`, `app.py` | PySide6 UI |
+| `version.py` | GUI 버전(`VERSION`)과 빌드 일자 표시. 빌드 일자는 빌드 때 생성되는 `_build_info.py`에서 읽음 |
 | `tests/` | pytest 테스트 |
 
 ## 알려진 제한
 
 - **ASCII만 지원**합니다. 한글 등은 입력할 수 없고, 키 입력은 US 키보드 배열 기준입니다.
-- **펌웨어는 아직 이 프로토콜을 구현하지 않았습니다.** 지금은 `--mock`으로만 전체 기능을 확인할 수 있고,
-  실제 장치와의 통신은 검증되지 않았습니다.
-- 펌웨어 업데이트(부트로더 진입 후 굽기)는 구현하지 않았습니다. `device.py`에 BOOT 명령만 있습니다.
-- 장치 통신은 UI 스레드에서 동기적으로 처리합니다(최대 4KB, 수십 번 왕복이라 보통 짧게 끝남).
+- 펌웨어 v1.0의 저장 용량은 128바이트(9개 슬롯 합계 102자)입니다.
+- 펌웨어 업데이트(부트로더 진입 후 굽기)는 GUI에 구현하지 않았습니다. `device.py`에 BOOT 명령만 있고,
+  업로드는 `tools/flash.ps1`로 합니다.
+- 장치 통신은 UI 스레드에서 동기적으로 처리합니다(128바이트, 몇 번 왕복이라 금방 끝남).

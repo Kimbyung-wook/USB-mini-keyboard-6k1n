@@ -16,6 +16,7 @@ from . import backup, macro
 from . import protocol as p
 from .device import DeviceClient, DeviceError, NotConnectedError
 from .transport import HidTransport, MockDevice, Transport, TransportError
+from .version import VERSION, version_text
 from .widgets import DeviceView, MacroEditor
 
 APP_TITLE = "매크로 키보드 설정 (6키 + 노브)"
@@ -35,7 +36,7 @@ class MainWindow(QMainWindow):
     def __init__(self, connect_fn: Callable[[], Transport], *, auto_reconnect: bool = True,
                  mock_label: str = ""):
         super().__init__()
-        self.setWindowTitle(APP_TITLE + (f" — {mock_label}" if mock_label else ""))
+        self.setWindowTitle(f"{APP_TITLE} v{VERSION}" + (f" — {mock_label}" if mock_label else ""))
         self.resize(900, 680)
 
         self._connect_fn = connect_fn
@@ -122,7 +123,10 @@ class MainWindow(QMainWindow):
         root.addLayout(actions)
 
         self.setCentralWidget(central)
-        self.statusBar()
+        # Version and build date stay at the right end of the status bar
+        self.version_label = QLabel(version_text())
+        self.version_label.setStyleSheet("color: palette(mid);")
+        self.statusBar().addPermanentWidget(self.version_label)
         self.editor.set_slot(0, self.slots[0])
 
     # ------------------------------------------------------------ dialogs (overridable in tests)
