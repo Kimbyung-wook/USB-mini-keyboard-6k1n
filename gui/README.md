@@ -155,10 +155,12 @@ UTF-8 JSON 파일입니다.
 | `transport.py` | `HidTransport`(hidapi) / `MockDevice`(펌웨어 시뮬레이터) |
 | `device.py` | 장치 클라이언트: HELLO / READ / WRITE + COMMIT / TEST / BOOT, 시간 제한, 오류 처리, 프로토콜 v1/v2 |
 | `backup.py` | JSON 백업 읽기/쓰기 |
-| `flasher.py` | 펌웨어 업로드: 업로더 찾기, HEX 크기 검사, 업로더 출력 해석 |
+| `flasher.py` | 펌웨어 업로드: 업로더 찾기, HEX 읽기(크기, 펌웨어 식별 문자열), 업로더 명령, 업로더 출력 해석 |
+| `boards.py` | 보드 목록: 보드 이름, 배치, 부트로더 진입 설정, 업데이트 모드 안내, 펌웨어 파일 이름 |
+| `chips.py` | 칩 표: 칩 ID별 이름, 플래시 용량, 지원 여부 |
 | `bootloader.py` | 업데이트 모드 칩 검색: WCH 드라이버(`CH375DLL64.dll`)로 Detect/ReadConfig만 보내 파트 번호, 칩 ID, 부트로더 버전을 읽음 |
 | `flash_dialog.py` | [펌웨어 업데이트] 창 (인식된 칩 목록, [장입] 시 QProcess로 업로더 실행) |
-| `widgets.py`, `app.py` | PySide6 UI (장치 그림, 매크로 편집기, 패턴 암호 편집기) |
+| `widgets.py`, `app.py` | PySide6 UI (장치 그림, 매크로 편집기, 패턴 암호·자동 잠금 편집기) |
 | `version.py` | GUI 버전(`VERSION`)과 빌드 일자 표시. 빌드 일자는 빌드 때 생성되는 `_build_info.py`에서 읽음 |
 | `tests/` | pytest 테스트 |
 

@@ -22,10 +22,15 @@
 | 설정 GUI | ✅ 실제 장치와 동작 확인 (2026-10-26). 키보드 없이 `--mock`으로도 실행 가능 |
 | 본 펌웨어 v1.0 ([firmware/macro_keyboard](firmware/macro_keyboard/)) | ✅ 실제 장치에서 동작 확인 (2026-10-26). 빌드와 PC 검사(host_test) 통과 |
 | 패턴 암호 (펌웨어 v1.1, 프로토콜 v2) | ✅ 실제 장치에서 동작 확인 (2026-10-26). 빌드, host_test, GUI 테스트 통과. 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#4-잠금-확인) |
+| 잠금 개선 (펌웨어 v1.2) | ✅ 잠긴 동안 키 무시, 노브 길게 누르기로 패턴 입력 시작, 다시 잠그기 ([잠금 상태도](#잠금-상태도)) |
+| 펌웨어 크기 줄이기 (v1.2.1) | ✅ 기능은 그대로 11,587 → 8,151바이트 ([docs/FIRMWARE_SIZE.md](docs/FIRMWARE_SIZE.md)) |
+| 보드 정보 (펌웨어 v1.3, GUI 1.3) | ✅ HELLO로 칩·키/노브 수·보드 이름을 알리고 GUI가 그 배치로 화면을 만듦. 펌웨어 업데이트 창은 보드 목록과 칩 표로 업로더 옵션을 고르고 hex의 식별 문자열을 확인 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md)) |
+| 노브 2초, 자동 잠금 (펌웨어 v1.4, GUI 1.4) | ✅ 패턴 입력 시작이 노브 2초. 풀린 뒤 N분(GUI에서 설정, 0 = 안 함) 동안 입력이 없으면 자동으로 잠김. 실제 장치에서 확인 (2026-10-27) |
+| 다른 키보드 (8키, 9키 CH57x) | 계획 중 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md) 7~8절) |
 
 ## 잠금 상태도
 
-> 펌웨어 v1.2의 잠금 동작입니다. 사용 방법과 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#잠금)를 보세요. (v1.1은 잠긴 동안 키 입력을 바로 패턴으로 받았고, 다시 잠그기가 없었습니다.)
+> 펌웨어 v1.2 이후의 잠금 동작입니다(v1.3.1에서 노브 3초 → 2초, v1.4에서 자동 잠금 추가). 사용 방법과 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#잠금)를 보세요. (v1.1은 잠긴 동안 키 입력을 바로 패턴으로 받았고, 다시 잠그기가 없었습니다.)
 
 ```mermaid
 stateDiagram-v2
@@ -105,11 +110,13 @@ stateDiagram-v2
 | [PLAN.md](PLAN.md) | 전체 계획, 하드웨어 조사 기록, 단계별 진행 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 펌웨어와 GUI가 공유하는 Vendor HID 설정 통신 규격 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 빌드 오류, 업로드 실패와 복구 등 실제로 겪은 문제와 해결 방법 |
+| [docs/BOARD_INFO.md](docs/BOARD_INFO.md) | 보드 정보 설계: 여러 키보드(보드) 지원, 보드 목록, 칩 표, CH57x 이식 방침 |
+| [docs/FIRMWARE_SIZE.md](docs/FIRMWARE_SIZE.md) | 펌웨어 크기 줄이기 제안과 단계별 결과 |
 | [firmware/macro_keyboard/](firmware/macro_keyboard/) | 본 펌웨어 (빌드, 업로드, 동작 테스트 방법 포함) |
 | [firmware/test_pinmap/](firmware/test_pinmap/) | 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
 | [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
-| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
+| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
 
 ## 빠른 시작
 
@@ -120,6 +127,8 @@ stateDiagram-v2
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 ```
+
+결과는 `firmware\macro_keyboard\build\macro_keyboard-MK6K1N.hex`(보드 이름이 붙은 파일, GUI가 먼저 고름)와 `macro_keyboard.ino.hex`입니다.
 
 **펌웨어 업로드**
 
