@@ -129,7 +129,7 @@ def main() -> int:
         short = ["Hi{ENTER}", "{CTRL+C}"] + [""] * 7
         lock = [0, 1, 2, 6]
         locked_blob = p.encode_blob(short, lock)
-        # H = knob held 3 s (starts a pattern entry), t = entry timeout
+        # H = knob held LOCK_HOLD_MS (starts a pattern entry), t = entry timeout
         lines = run(exe, out, locked_blob, extra=["lock", "0126", "H", "0126"])
         check("lock blob commits", lines[2], "commit status 0")
         check("locked ignores inputs until the knob hold, then the pattern opens",
@@ -180,6 +180,22 @@ def main() -> int:
         # Both entries wait 10 s, so the pattern still finishes after the pause
         check("6 s pause: unlock and re-lock entries (10 s) go on",
               " | ".join(lock_states(lines)[1:]), "open 1 | locked 3")
+
+        # Auto-lock (settings slot): m = one minute without input
+        auto_blob = p.encode_blob(short, lock, autolock=2)
+        lines = run(exe, out, auto_blob, extra=["lock", "H0126", "m", "m"])
+        check("auto-lock blob commits", lines[2], "commit status 0")
+        check("auto-lock: 2 idle minutes lock an open keyboard",
+              " | ".join(lock_states(lines)[1:]), "open 1 | open 1 | locked 3")
+        lines = run(exe, out, auto_blob, extra=["lock", "H0126", "m", "5", "m", "m"])
+        check("auto-lock: an input starts the time over",
+              " | ".join(lock_states(lines)[1:]), "open 1 | open 1 | open 1 | open 1 | locked 3")
+        lines = run(exe, out, auto_blob, extra=["lock", "H0126", "mm", "H1111"] + ["H1111"] * 3 + ["H0126"])
+        check("auto-lock gives 5 fresh unlock tries", lock_states(lines)[-1], "open 1")
+        lines = run(exe, out, locked_blob, extra=["lock", "H0126", "mmmmm"])
+        check("no settings slot: never auto-locks", lock_states(lines)[-1], "open 1")
+        got = slot_lines(run(exe, out, auto_blob))
+        check("slots still type next to the settings slot", got[1], keys((CTRL, 0x06)))
 
         lines = run(exe, out, p.encode_blob(short), extra=["lock", "H"])
         check("no pattern starts open and the hold does nothing",

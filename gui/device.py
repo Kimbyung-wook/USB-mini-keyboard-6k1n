@@ -161,11 +161,15 @@ class DeviceClient:
         return p.decode_blob(self.read_blob(progress), board)
 
     def write_config(self, slots: list[str], progress: Progress | None = None,
-                     check_capacity: bool = True, lock: list[int] | tuple[int, ...] = ()) -> int:
+                     check_capacity: bool = True, lock: list[int] | tuple[int, ...] = (),
+                     autolock: int = 0) -> int:
         """WRITE the encoded blob in chunks, then COMMIT. Returns blob size."""
         info = self._require_info()
+        if autolock and not info.supports_autolock:
+            raise DeviceError(f"펌웨어 v{info.fw_version}은 자동 잠금을 지원하지 않습니다. "
+                              "펌웨어를 1.4.0 이상으로 업데이트하거나 자동 잠금을 0분으로 두세요")
         try:
-            blob = p.encode_blob(slots, lock, info.board)
+            blob = p.encode_blob(slots, lock, info.board, autolock)
         except p.BlobError as e:
             raise DeviceError(f"설정을 만들 수 없습니다: {e}") from e
         if lock and not info.supports_lock:

@@ -7,7 +7,7 @@
   - Interface 1: vendor HID for the config GUI (gui/), protocol v2.
   - Config is stored in the 128-byte DataFlash.
   - Lock (README.md "잠금 상태도"): with a lock pattern stored, it starts
-    locked and ignores every input. Holding the knob for 3 s starts a
+    locked and ignores every input. Holding the knob for 2 s starts a
     pattern entry: the pattern unlocks it. On an open keyboard the same hold
     and pattern lock it again (five wrong re-lock tries lock it as well).
   - LED (WS2812 on P3.4): locked = dark with a short red blink every 3 s,
@@ -165,6 +165,7 @@ void jumpToBootloader() {
 // A key or knob action: a pattern step during a pattern entry, typed when
 // open, ignored when locked
 void onInput(uint8_t slot) {
+  lock_activity();
   if (lock_entering()) {
     lock_input(slot);
   } else if (lock_state() == LOCK_OPEN) {

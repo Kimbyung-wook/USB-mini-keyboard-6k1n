@@ -19,6 +19,9 @@ uint8_t storage_slot_len(__data uint8_t slot);
 uint8_t storage_lock_len(void);
 __xdata uint8_t *storage_lock_steps(void);
 
+// Settings slot: auto-lock minutes (0 = never)
+uint8_t storage_autolock_minutes(void);
+
 // Staging for WRITE/COMMIT. Return a protocol status code.
 uint8_t storage_stage_write(__data uint16_t offset, __data uint8_t len,
                             __xdata uint8_t *data);

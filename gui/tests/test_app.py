@@ -285,7 +285,7 @@ def test_poll_notices_relock_and_unlock(qapp):
     w.mock.relock(LOCK)                      # knob hold + pattern on the keyboard
     w._poll_device()
     assert w.device_locked and not w.read_btn.isEnabled()
-    assert "노브를 3초" in w.conn_label.text()
+    assert "노브를 2초" in w.conn_label.text()
     w.mock.enter_pattern(LOCK)
     w._poll_device()
     assert not w.device_locked

@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMenu,
-    QPlainTextEdit, QPushButton, QSizePolicy, QTextEdit, QToolButton,
+    QPlainTextEdit, QPushButton, QSizePolicy, QSpinBox, QTextEdit, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -241,10 +241,15 @@ class MacroEditor(QWidget):
 
 LOCK_HELP = (
     "키보드를 꽂으면 잠긴 상태(LED 꺼짐, 가끔 빨간색 깜빡)로 시작하고 키를 눌러도 반응하지 않습니다. "
-    "노브를 3초 누르면 빨간색이 계속 켜지고, 이때 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
-    "풀린 상태에서 노브를 3초 누르고 같은 패턴을 입력하면 다시 잠깁니다(5번 틀려도 잠김). "
+    "노브를 2초 누르면 빨간색이 계속 켜지고, 이때 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
+    "풀린 상태에서 노브를 2초 누르고 같은 패턴을 입력하면 다시 잠깁니다(5번 틀려도 잠김). "
     "잠긴 동안에는 GUI에서 읽기·테스트 입력도 할 수 없고, 풀기를 5번 틀리면 빨간색이 계속 깜빡이며 다시 꽂아야 합니다. "
     "비워 두면 잠금을 쓰지 않습니다."
+)
+
+AUTOLOCK_HELP = (
+    "풀린 뒤 키/노브 입력과 GUI 작업(읽기·저장·테스트 입력)이 이 시간 동안 없으면 저절로 잠깁니다. "
+    "0분이면 자동으로 잠그지 않습니다. 패턴 암호가 있을 때만 쓰이고, 펌웨어 1.4.0 이상이 필요합니다."
 )
 
 
@@ -252,11 +257,13 @@ class LockPatternEditor(QGroupBox):
     """Builds the lock pattern from the keyboard's key/knob inputs."""
 
     patternChanged = Signal(list)
+    autolockChanged = Signal(int)
 
     def __init__(self, parent: QWidget | None = None, board: p.Board = p.DEFAULT_BOARD):
         super().__init__("패턴 암호", parent)
         self.steps: list[int] = []
         self.board = board
+        self.autolock_supported = True
 
         self.display = QLabel()
         self.display.setStyleSheet("font-weight: bold; font-size: 14px;")
@@ -288,9 +295,23 @@ class LockPatternEditor(QGroupBox):
         help_label.setWordWrap(True)
         help_label.setStyleSheet("color: palette(placeholder-text); font-size: 11px;")
 
+        self.autolock_spin = QSpinBox()
+        self.autolock_spin.setRange(0, p.AUTOLOCK_MAX_MINUTES)
+        self.autolock_spin.setSuffix("분")
+        self.autolock_spin.setSpecialValueText("0분 (끔)")
+        self.autolock_spin.setToolTip(AUTOLOCK_HELP)
+        self.autolock_spin.valueChanged.connect(self.autolockChanged.emit)
+        self.autolock_note = QLabel()
+        self.autolock_note.setStyleSheet("color: palette(placeholder-text); font-size: 11px;")
+        autolock = QHBoxLayout()
+        autolock.addWidget(QLabel("자동 잠금:"))
+        autolock.addWidget(self.autolock_spin)
+        autolock.addWidget(self.autolock_note, 1)
+
         lay = QVBoxLayout(self)
         lay.addLayout(top)
         lay.addLayout(inputs)
+        lay.addLayout(autolock)
         lay.addWidget(help_label)
         self._refresh()
 
@@ -328,6 +349,20 @@ class LockPatternEditor(QGroupBox):
     def set_modified(self, modified: bool) -> None:
         self.setTitle("패턴 암호 *" if modified else "패턴 암호")
 
+    def autolock(self) -> int:
+        return self.autolock_spin.value()
+
+    def set_autolock(self, minutes: int) -> None:
+        """Show the auto-lock minutes without emitting autolockChanged."""
+        self.autolock_spin.blockSignals(True)
+        self.autolock_spin.setValue(minutes)
+        self.autolock_spin.blockSignals(False)
+        self._refresh()
+
+    def set_autolock_supported(self, supported: bool) -> None:
+        self.autolock_supported = supported
+        self._refresh()
+
     def add_step(self, slot: int) -> None:
         if len(self.steps) < p.LOCK_MAX_STEPS:
             self._set(self.steps + [slot])
@@ -348,8 +383,9 @@ class LockPatternEditor(QGroupBox):
             self.status.setStyleSheet("color: #c62828;")
             self.status.setText(f"{n}단계 · {p.LOCK_MIN_STEPS}단계 이상 필요")
         elif n:
+            used = 2 + n + (3 if self.autolock() else 0)
             self.status.setStyleSheet("color: #2e7d32;")
-            self.status.setText(f"✔ {n}단계 · {2 + n}바이트 사용")
+            self.status.setText(f"✔ {n}단계 · {used}바이트 사용")
         else:
             self.status.setStyleSheet("")
             self.status.setText(f"{p.LOCK_MIN_STEPS}~{p.LOCK_MAX_STEPS}단계")
@@ -358,3 +394,13 @@ class LockPatternEditor(QGroupBox):
             b.setEnabled(not full)
         self.back_btn.setEnabled(n > 0)
         self.clear_btn.setEnabled(n > 0)
+        # Without a pattern there is nothing to lock
+        self.autolock_spin.setEnabled(self.autolock_supported and n > 0)
+        if not self.autolock_supported:
+            self.autolock_note.setText("이 펌웨어는 자동 잠금을 지원하지 않습니다 (펌웨어 1.4.0 이상 필요)")
+        elif not n:
+            self.autolock_note.setText("패턴 암호를 정하면 쓸 수 있습니다")
+        elif self.autolock():
+            self.autolock_note.setText(f"입력이 {self.autolock()}분 동안 없으면 잠급니다 (3바이트 사용)")
+        else:
+            self.autolock_note.setText("자동으로 잠그지 않습니다")

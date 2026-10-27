@@ -3,7 +3,7 @@
 
 // Firmware version reported by HELLO and the USB device descriptor
 #define FW_MAJOR 1
-#define FW_MINOR 3
+#define FW_MINOR 4
 #define FW_PATCH 0
 
 // Build date reported by HELLO, passed in by tools/build_fw.ps1
@@ -36,6 +36,7 @@
 #define BOARD_INFO_VERSION 1 // HELLO byte 17
 #define BOARD_FEATURE_RGB_LED 0x01
 #define BOARD_FEATURE_LOCK 0x02
+#define BOARD_FEATURE_AUTO_LOCK 0x08 // settings slot: auto-lock minutes (1.4.0)
 // CH55xduino pin numbers are port * 10 + bit
 #define PIN_PORT(p) ((p) / 10)
 #define PIN_BIT(p) (1 << ((p) % 10))
@@ -63,10 +64,15 @@
 #define LOCK_MIN_STEPS 4
 #define LOCK_MAX_STEPS 8
 #define LOCK_MAX_FAILS 5          // then inputs are ignored until replugged
-#define LOCK_HOLD_MS 3000          // knob hold that starts a pattern entry
+#define LOCK_HOLD_MS 2000          // knob hold that starts a pattern entry (3000 before 1.3.1)
 // A pause this long cancels a pattern entry (unlock / re-lock)
 #define LOCK_UNLOCK_TIMEOUT_MS 10000
 #define LOCK_RELOCK_TIMEOUT_MS 10000
+
+// Settings (docs/PROTOCOL.md "설정 슬롯"): optional slot after the lock slot.
+// Byte 0 = auto-lock minutes: an open keyboard with a lock pattern locks
+// after that long without input (0 or no settings slot = never).
+#define SLOT_SETTINGS (SLOT_LOCK + 1)
 
 // Config blob lives in the 128-byte DataFlash
 #define BLOB_CAPACITY 128

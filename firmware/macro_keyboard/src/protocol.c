@@ -25,7 +25,7 @@ __code struct {
   uint8_t head[7];
   char name[8];
 } boardInfo = {{BOARD_INFO_VERSION, BOARD_CHIP_ID, BOARD_KEYS, BOARD_KNOBS,
-                BOARD_ROWS, BOARD_FEATURES, 0},
+                BOARD_ROWS, BOARD_FEATURES | BOARD_FEATURE_AUTO_LOCK, 0},
                BOARD_NAME};
 
 // Firmware ID that the GUI looks for in the .hex file before flashing it
@@ -51,6 +51,11 @@ uint8_t protocol_poll(void) {
   }
   res[0] = cmd | 0x80;
   res[1] = req[1]; // seq
+  // GUI work keeps an open keyboard from auto-locking; the GUI's HELLO
+  // polling does not, or a running GUI would keep it open forever
+  if (cmd != CMD_HELLO) {
+    lock_activity();
+  }
 
   switch (cmd) {
   case CMD_HELLO:

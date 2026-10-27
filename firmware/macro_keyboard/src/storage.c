@@ -12,8 +12,9 @@ static __xdata uint8_t blob[BLOB_CAPACITY];
 static __xdata uint8_t stage[BLOB_CAPACITY];
 static __xdata uint8_t stageLen;
 
-// Macro slots plus the lock pattern (SLOT_LOCK)
-#define STORED_SLOTS (SLOT_COUNT + 1)
+// Macro slots plus the lock pattern (SLOT_LOCK) and settings (SLOT_SETTINGS).
+// Slots after these are accepted and ignored (newer GUIs).
+#define STORED_SLOTS (SLOT_SETTINGS + 1)
 static __xdata uint8_t slotOffset[STORED_SLOTS];
 static __xdata uint8_t slotLength[STORED_SLOTS];
 
@@ -134,6 +135,10 @@ uint8_t storage_slot_len(__data uint8_t slot) {
 uint8_t storage_lock_len(void) { return slotLength[SLOT_LOCK]; }
 
 __xdata uint8_t *storage_lock_steps(void) { return blob + slotOffset[SLOT_LOCK]; }
+
+uint8_t storage_autolock_minutes(void) {
+  return slotLength[SLOT_SETTINGS] ? blob[slotOffset[SLOT_SETTINGS]] : 0;
+}
 
 uint8_t storage_stage_write(__data uint16_t offset, __data uint8_t len,
                             __xdata uint8_t *data) {

@@ -13,12 +13,24 @@ static __data uint8_t enteredLen;
 static __data uint8_t unlockFails; // wrong unlock tries; LOCK_MAX_FAILS blocks
 static __data uint8_t relockFails; // wrong re-lock tries; LOCK_MAX_FAILS locks
 static __data uint16_t lastInputAt;
+// Auto-lock: time open without input, in whole minutes and seconds counted
+// from idleTickAt (8-bit counters, no multiply: 255 min at most)
+static __data uint16_t idleTickAt;
+static __data uint8_t idleSeconds;
+static __data uint8_t idleMinutes;
+
+void lock_activity(void) {
+  idleSeconds = 0;
+  idleMinutes = 0;
+  idleTickAt = (uint16_t)millis();
+}
 
 void lock_init(void) {
   state = storage_lock_len() ? LOCK_LOCKED : LOCK_OPEN;
   enteredLen = 0;
   unlockFails = 0;
   relockFails = 0;
+  lock_activity();
 }
 
 void lock_config_changed(void) {
@@ -77,13 +89,32 @@ static void lockNow(void) {
 }
 
 void lock_task(void) {
-  // An entry left unfinished is cancelled without counting as a wrong try
-  __data uint16_t idle = (uint16_t)millis() - lastInputAt;
+  __data uint16_t now = (uint16_t)millis();
+  __data uint16_t idle = now - lastInputAt;
+  __data uint8_t minutes = storage_autolock_minutes();
 
+  // An entry left unfinished is cancelled without counting as a wrong try
   if (state == LOCK_UNLOCKING && idle >= LOCK_UNLOCK_TIMEOUT_MS) {
     state = LOCK_LOCKED;
   } else if (state == LOCK_RELOCK && idle >= LOCK_RELOCK_TIMEOUT_MS) {
     state = LOCK_OPEN;
+  }
+
+  // Auto-lock counts only while open with a pattern; anything else starts
+  // the time over
+  if (state != LOCK_OPEN || !minutes || !storage_lock_len()) {
+    lock_activity();
+    return;
+  }
+  while ((uint16_t)(now - idleTickAt) >= 1000) {
+    idleTickAt += 1000;
+    if (++idleSeconds == 60) {
+      idleSeconds = 0;
+      idleMinutes++;
+    }
+  }
+  if (idleMinutes >= minutes) {
+    lockNow();
   }
 }
 

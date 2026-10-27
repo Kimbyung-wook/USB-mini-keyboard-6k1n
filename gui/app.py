@@ -47,6 +47,8 @@ class MainWindow(QMainWindow):
         self.baseline: list[str] = [""] * self.board.slot_count   # what the device holds
         self.lock: list[int] = []
         self.lock_baseline: list[int] = []
+        self.autolock = 0                 # auto-lock minutes, 0 = never
+        self.autolock_baseline = 0
         self.current = 0
         self._countdown = 0
         self._flashing = False
@@ -100,6 +102,7 @@ class MainWindow(QMainWindow):
         # Lock pattern
         self.lock_editor = LockPatternEditor()
         self.lock_editor.patternChanged.connect(self.set_lock)
+        self.lock_editor.autolockChanged.connect(self.set_autolock)
         root.addWidget(self.lock_editor)
 
         # Editor
@@ -177,13 +180,13 @@ class MainWindow(QMainWindow):
         return self.slots[slot] != self.baseline[slot]
 
     def lock_modified(self) -> bool:
-        return self.lock != self.lock_baseline
+        return self.lock != self.lock_baseline or self.autolock != self.autolock_baseline
 
     def has_unsaved(self) -> bool:
         return self.lock_modified() or any(self.is_modified(i) for i in range(len(self.slots)))
 
     def blob_size(self) -> int:
-        return p.blob_size(self.slots, self.lock)
+        return p.blob_size(self.slots, self.lock, self.autolock)
 
     def invalid_slots(self) -> list[int]:
         return [i for i, s in enumerate(self.slots) if not macro.parse(s).ok]
@@ -192,6 +195,7 @@ class MainWindow(QMainWindow):
         for i in range(len(self.slots)):
             self._refresh_slot(i)
         self.lock_editor.set_pattern(self.lock)
+        self.lock_editor.set_autolock(self.autolock)
         self.lock_editor.set_modified(self.lock_modified())
         self._refresh_capacity()
         self._refresh_connection()
@@ -235,7 +239,7 @@ class MainWindow(QMainWindow):
                 self.conn_label.setText(f"🔒 잠김 {head} — 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요")
                 self.conn_label.setStyleSheet("font-weight: bold; color: #c62828;")
             elif info.locked:
-                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하세요")
+                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 노브를 2초 누른 뒤 패턴 암호를 입력하세요")
                 self.conn_label.setStyleSheet("font-weight: bold; color: #e65100;")
             else:
                 self.conn_label.setText(f"● 연결됨 {head}")
@@ -262,6 +266,7 @@ class MainWindow(QMainWindow):
         self.lock_editor.setEnabled(on and (supported or bool(self.lock)))  # still lets a pattern be cleared
         self.lock_editor.setToolTip("" if supported else
                                     "이 펌웨어는 잠금을 지원하지 않습니다 (펌웨어 v1.1 이상 필요)")
+        self.lock_editor.set_autolock_supported(not on or self.client.info.supports_autolock)
 
     def _update_title(self) -> None:
         base = self.windowTitle().lstrip("* ")
@@ -286,7 +291,17 @@ class MainWindow(QMainWindow):
 
     def set_lock(self, steps: list[int]) -> None:
         self.lock = list(steps)
+        if not self.lock:
+            self.autolock = 0      # nothing to lock without a pattern
+            self.lock_editor.set_autolock(0)
         self.lock_editor.set_pattern(self.lock)
+        self.lock_editor.set_modified(self.lock_modified())
+        self._refresh_capacity()
+        self._update_title()
+
+    def set_autolock(self, minutes: int) -> None:
+        self.autolock = minutes
+        self.lock_editor.set_autolock(minutes)
         self.lock_editor.set_modified(self.lock_modified())
         self._refresh_capacity()
         self._update_title()
@@ -305,19 +320,23 @@ class MainWindow(QMainWindow):
         self.baseline = [""] * board.slot_count
         self.lock = []
         self.lock_baseline = []
+        self.autolock = self.autolock_baseline = 0
         self.editor.set_slot(0, "")
         self._refresh_all()
         self._update_title()
 
     def _load_slots(self, slots: list[str], lock: list[int] | None = None, *,
-                    from_device: bool) -> None:
-        """Load slot texts; lock None keeps the current pattern (JSON has none)."""
+                    from_device: bool, autolock: int | None = None) -> None:
+        """Load slot texts; lock/autolock None keep the current ones (JSON has none)."""
         self.slots = list(slots)
         if lock is not None:
             self.lock = list(lock)
+        if autolock is not None:
+            self.autolock = autolock
         if from_device:
             self.baseline = list(slots)
             self.lock_baseline = list(self.lock)
+            self.autolock_baseline = self.autolock
         self.editor.set_slot(self.current, self.slots[self.current])
         self._refresh_all()
         self._update_title()
@@ -355,7 +374,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("장치에 연결했습니다", 3000)
         if client.info.locked:
             self.statusBar().showMessage(
-                "장치가 잠겨 있습니다. 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하면 설정을 읽어옵니다", 8000)
+                "장치가 잠겨 있습니다. 키보드에서 노브를 2초 누른 뒤 패턴 암호를 입력하면 설정을 읽어옵니다", 8000)
         elif not self.has_unsaved():
             self.read_from_device(confirm=False)
         else:
@@ -379,6 +398,7 @@ class MainWindow(QMainWindow):
         self.baseline = [""] * self.board.slot_count
         self.lock = []
         self.lock_baseline = []
+        self.autolock = self.autolock_baseline = 0
         self.editor.set_slot(self.current, "")
         self._refresh_all()
         self._update_title()
@@ -456,7 +476,7 @@ class MainWindow(QMainWindow):
             self._handle_device_error("읽기 실패", e)
             return False
         QApplication.restoreOverrideCursor()
-        self._load_slots(cfg.slots, cfg.lock, from_device=True)
+        self._load_slots(cfg.slots, cfg.lock, from_device=True, autolock=cfg.autolock)
         if cfg.valid:
             self.statusBar().showMessage("장치에서 설정을 읽었습니다", 3000)
         else:
@@ -490,11 +510,14 @@ class MainWindow(QMainWindow):
             question = f"{len(self.slots)}개 슬롯 전체({size}바이트)를 장치에 저장할까요?"
         lock_note = (f"\n패턴 암호: {p.lock_text(self.lock, self.board)}" if self.lock
                      else "\n패턴 암호: 없음")
+        if self.lock:
+            minutes = f"{self.autolock}분" if self.autolock else "끔"
+            lock_note += f"\n자동 잠금: {minutes}"
         if confirm and not self.ask("장치에 저장", question + lock_note):
             return False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.client.write_config(self.slots, lock=self.lock)
+            self.client.write_config(self.slots, lock=self.lock, autolock=self.autolock)
             self.client.hello()   # lock flags may have changed
         except DeviceError as e:
             QApplication.restoreOverrideCursor()
@@ -503,6 +526,7 @@ class MainWindow(QMainWindow):
         QApplication.restoreOverrideCursor()
         self.baseline = list(self.slots)
         self.lock_baseline = list(self.lock)
+        self.autolock_baseline = self.autolock
         self._refresh_all()
         self._update_title()
         self.statusBar().showMessage(f"장치에 저장했습니다 ({size}바이트)", 5000)
@@ -669,13 +693,19 @@ def parse_board(text: str) -> p.Board:
     parts = [int(x) for x in text.lower().split("x")]
     keys, knobs = parts[0], parts[1] if len(parts) > 1 else 1
     rows = parts[2] if len(parts) > 2 else (1 if keys <= 4 else 2 if keys <= 8 else 3)
-    return p.Board(keys=keys, knobs=knobs, rows=rows, name=f"MOCK{keys}K{knobs}N")
+    return p.Board(keys=keys, knobs=knobs, rows=rows, name=f"MOCK{keys}K{knobs}N",
+                   features=MOCK_FEATURES)
+
+
+# The mock acts like the newest firmware
+MOCK_FEATURES = p.BOARD_FEATURE_RGB_LED | p.BOARD_FEATURE_LOCK | p.BOARD_FEATURE_AUTO_LOCK
 
 
 def build_window(use_mock: bool, mock_board: p.Board | None = None) -> MainWindow:
     if use_mock:
         if mock_board is None:
-            mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS))
+            mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS),
+                              board=p.Board(features=MOCK_FEATURES))
         else:
             mock = MockDevice(capacity=DEFAULT_CAPACITY, board=mock_board)
         return MainWindow(make_mock_connector(mock), auto_reconnect=False, mock_label="모의 장치")

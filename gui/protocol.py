@@ -44,6 +44,8 @@ LOCK_FLAG_BLOCKED = 0x04
 BOARD_INFO_VERSION = 1      # HELLO byte 17 (docs/BOARD_INFO.md)
 BOARD_FEATURE_RGB_LED = 0x01
 BOARD_FEATURE_LOCK = 0x02
+BOARD_FEATURE_AUTO_LOCK = 0x08   # settings slot with auto-lock minutes (firmware 1.4.0)
+AUTOLOCK_MAX_MINUTES = 255
 MAX_SLOTS = 63
 BOARD_NAME_LEN = 8
 
@@ -65,7 +67,8 @@ class Board:
     rows: int = 2
     name: str = "MK6K1N"
     chip_id: int = 0x52                  # as the bootloader's Detect reports it
-    features: int = BOARD_FEATURE_RGB_LED | BOARD_FEATURE_LOCK
+    # what the firmware supports; not part of the layout (==)
+    features: int = field(default=BOARD_FEATURE_RGB_LED | BOARD_FEATURE_LOCK, compare=False)
     # chip unique ID, empty when unknown; not part of the layout (==)
     uid: bytes = field(default=b"", compare=False)
 
@@ -192,7 +195,7 @@ STATUS_MESSAGES_KO = {
     Status.TOO_BIG: "저장 용량을 초과했습니다",
     Status.FLASH_ERR: "장치의 Flash 지우기/쓰기에 실패했습니다",
     Status.BUSY: "장치가 문자열을 출력하는 중입니다. 잠시 후 다시 시도하세요",
-    Status.LOCKED: "장치가 잠겨 있습니다. 키보드에서 노브를 3초 누른 뒤 패턴 암호를 입력하세요",
+    Status.LOCKED: "장치가 잠겨 있습니다. 키보드에서 노브를 2초 누른 뒤 패턴 암호를 입력하세요",
 }
 
 
@@ -337,6 +340,11 @@ class HelloInfo:
     def blocked(self) -> bool:
         return bool(self.lock_flags & LOCK_FLAG_BLOCKED)
 
+    @property
+    def supports_autolock(self) -> bool:
+        """Firmware 1.4.0+: the settings slot with auto-lock minutes is used."""
+        return self.board_info is not None and bool(self.board_info.features & BOARD_FEATURE_AUTO_LOCK)
+
 
 # Board info inside the HELLO result (bytes 3..63): packet byte 17 = result[14]
 BOARD_INFO_OFFSET = 14
@@ -404,6 +412,7 @@ class Config:
     valid: bool = True       # False -> "설정 없음" (blank or corrupt blob)
     reason: str = ""         # why the blob was rejected, for display
     lock: list[int] = field(default_factory=list)   # empty = no lock
+    autolock: int = 0        # minutes without input before an open keyboard locks; 0 = never
 
     @classmethod
     def empty(cls, reason: str = "", board: Board = DEFAULT_BOARD) -> "Config":
@@ -414,17 +423,29 @@ class BlobError(ValueError):
     pass
 
 
+def autolock_error(minutes: int) -> str | None:
+    if not 0 <= minutes <= AUTOLOCK_MAX_MINUTES:
+        return f"자동 잠금 시간은 0~{AUTOLOCK_MAX_MINUTES}분이어야 합니다 (지금 {minutes})"
+    return None
+
+
 def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = (),
-                board: Board = DEFAULT_BOARD) -> bytes:
+                board: Board = DEFAULT_BOARD, autolock: int = 0) -> bytes:
     """Encode slot strings into a v1 blob. Strings must be ASCII.
 
     A lock pattern is stored as one more slot (lock_slot); without one the
-    blob has exactly the board's slots, as firmware 1.0 expects.
+    blob has exactly the board's slots, as firmware 1.0 expects. Auto-lock
+    minutes go into a settings slot after it (lock_slot + 1), only with a
+    pattern: without one there is nothing to lock. Older firmware ignores
+    slots past the lock slot.
     """
     if len(slots) != board.slot_count:
         raise BlobError(f"need {board.slot_count} slots, got {len(slots)}")
     lock = list(lock)
     err = lock_error(lock, board)
+    if err:
+        raise BlobError(err)
+    err = autolock_error(autolock)
     if err:
         raise BlobError(err)
     raws = []
@@ -435,6 +456,8 @@ def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = (),
             raise BlobError(f"slot {i} contains non-ASCII text") from e
     if lock:
         raws.append(bytes(lock))
+        if autolock:
+            raws.append(bytes([autolock]))
     payload = bytearray()
     for i, raw in enumerate(raws):
         if len(raw) > 0xFFFF:
@@ -447,10 +470,12 @@ def encode_blob(slots: list[str], lock: list[int] | tuple[int, ...] = (),
     return header + bytes(payload)
 
 
-def blob_size(slots: list[str], lock: list[int] | tuple[int, ...] = ()) -> int:
-    """Total blob length (header + payload) for the given slot texts and lock."""
+def blob_size(slots: list[str], lock: list[int] | tuple[int, ...] = (), autolock: int = 0) -> int:
+    """Total blob length (header + payload) for the given slot texts, lock and auto-lock."""
     size = BLOB_HEADER_SIZE + sum(2 + len(s.encode("ascii", errors="replace")) for s in slots)
-    return size + (2 + len(lock) if lock else 0)
+    if not lock:
+        return size
+    return size + 2 + len(lock) + (3 if autolock else 0)
 
 
 @dataclass
@@ -501,6 +526,8 @@ def decode_blob(data: bytes, board: Board = DEFAULT_BOARD) -> Config:
         lock = list(raws[board.lock_slot]) if len(raws) > board.lock_slot else []
         if lock_error(lock, board):
             raise BlobError(lock_error(lock, board))
+        settings = raws[board.lock_slot + 1] if len(raws) > board.lock_slot + 1 else b""
+        autolock = settings[0] if settings else 0
     except (BlobError, struct.error) as e:
         return Config.empty(str(e), board)
     # latin-1 never fails; non-ASCII bytes are caught by the validator.
@@ -508,4 +535,4 @@ def decode_blob(data: bytes, board: Board = DEFAULT_BOARD) -> Config:
     n = board.slot_count
     slots = [r.decode("latin-1") for r in raws[:n]]
     slots += [""] * (n - len(slots))
-    return Config(slots, valid=True, lock=lock)
+    return Config(slots, valid=True, lock=lock, autolock=autolock)

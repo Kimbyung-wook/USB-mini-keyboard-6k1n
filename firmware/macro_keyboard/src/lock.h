@@ -8,7 +8,9 @@
 // Holding the knob for LOCK_HOLD_MS starts a pattern entry: on a locked
 // keyboard the pattern unlocks it, on an open one the same pattern locks it
 // again; five wrong re-lock tries lock it too. Outside an entry a locked
-// keyboard ignores every input. States: README.md "잠금 상태도".
+// keyboard ignores every input. With auto-lock minutes stored, an open
+// keyboard also locks after that long without input (lock_activity).
+// States: README.md "잠금 상태도".
 
 #define LOCK_OPEN 0
 #define LOCK_LOCKED 1
@@ -30,5 +32,6 @@ uint8_t lock_start_entry(void); // knob held: 0 when there is nothing to enter
 uint8_t lock_entering(void);    // UNLOCKING or RELOCK
 void lock_task(void);           // from loop(): ends an entry left unfinished
 void lock_input(__data uint8_t slot); // a key/knob input while not open
+void lock_activity(void);       // any key/knob input or GUI request: restarts the auto-lock time
 
 #endif

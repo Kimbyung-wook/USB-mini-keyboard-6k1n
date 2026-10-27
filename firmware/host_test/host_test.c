@@ -6,7 +6,8 @@
 // prints the key reports, e.g. "slot 0: 02:0b 00:08 D50 ...".
 // "lock": each argument is a sequence of input numbers (0-8) entered on the
 // keyboard, "H" for holding the knob (starts a pattern entry), "t" for
-// waiting out the entry timeout and "w" for a 6 s pause;
+// waiting out the entry timeout, "w" for a 6 s pause and "m" for one minute
+// without input (auto-lock);
 // prints the lock state after each. "tail": commits blob2 over the blob and counts the
 // DataFlash bytes past blob2 that are not blank.
 #include <stdio.h>
@@ -92,7 +93,13 @@ static void runLock(int count, char **inputs) {
       } else if (*s == 'w') {
         now += 6000;
         lock_task();
+      } else if (*s == 'm') {
+        for (int sec = 0; sec < 60; sec++) {
+          now += 1000;
+          lock_task();
+        }
       } else {
+        lock_activity(); // as onInput() in the sketch
         lock_input((uint8_t)(*s - '0'));
       }
     }
