@@ -85,7 +85,9 @@ class FirmwareDialog(QDialog):
         self.chip_table.verticalHeader().setVisible(False)
         self.chip_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.chip_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.chip_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self.chip_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)   # serial + "(방금 연결된 키보드)"
         self.chip_table.setMaximumHeight(130)
         self.chip_status = QLabel()
         self.chip_status.setWordWrap(True)

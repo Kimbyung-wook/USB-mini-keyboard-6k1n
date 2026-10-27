@@ -158,3 +158,13 @@ def test_window_switching_keyboards_asks_about_unsaved_edits(qapp):
     assert len(w.device_view.buttons) == 9
     w.baseline = list(w.slots)
     w.close()
+
+
+def test_connection_bar_has_three_lines(qapp):
+    w = window(MockDevice(capacity=512, board=BIG, fw=(1, 4)))
+    w.connect_device()
+    state, board, fw = w.conn_label.text().split("<br>")
+    assert "연결됨 - 잠금 안 씀" in state
+    assert board == f"{BIG.name} ({BIG.summary}) / 용량 512바이트"
+    assert fw.startswith("펌웨어 v1.4")
+    w.close()

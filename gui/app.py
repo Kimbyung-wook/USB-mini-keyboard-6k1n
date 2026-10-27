@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import sys
 from typing import Callable
 
@@ -76,7 +77,8 @@ class MainWindow(QMainWindow):
         # Connection bar
         conn = QHBoxLayout()
         self.conn_label = QLabel()
-        self.conn_label.setStyleSheet("font-weight: bold;")
+        self.conn_label.setTextFormat(Qt.RichText)
+        self.conn_label.setWordWrap(True)
         self.connect_btn = QPushButton("연결")
         self.connect_btn.clicked.connect(self.toggle_connection)
         self.refresh_btn = QPushButton("새로고침")
@@ -229,26 +231,30 @@ class MainWindow(QMainWindow):
         self._refresh_buttons()
 
     def _refresh_connection(self) -> None:
+        # Three short lines instead of one long one: state - what to do,
+        # board / capacity, firmware
         if self.connected:
             info = self.client.info
-            src = self.client.transport.description if self.client.transport else ""
-            board = (f" · {info.board.name} ({info.board.summary})"
-                     if info.board_info is not None else "")
-            head = f"({src}){board} · {info.fw_text} · 용량 {info.capacity}바이트"
             if info.blocked:
-                self.conn_label.setText(f"🔒 잠김 {head} — 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요")
-                self.conn_label.setStyleSheet("font-weight: bold; color: #c62828;")
+                state, color = "🔒 잠김 - 5번 틀려서 입력을 막았습니다. 키보드를 다시 꽂으세요", "#c62828"
             elif info.locked:
-                self.conn_label.setText(f"🔒 잠김 {head} — 키보드에서 노브를 2초 누른 뒤 패턴 암호를 입력하세요")
-                self.conn_label.setStyleSheet("font-weight: bold; color: #e65100;")
+                state, color = "🔒 잠김 - 키보드에서 노브를 2초 누른 뒤 패턴 암호를 입력하세요", "#e65100"
+            elif info.lock_flags & p.LOCK_FLAG_SET:
+                state, color = "● 연결됨 - 잠금 풀림", "#2e7d32"
             else:
-                self.conn_label.setText(f"● 연결됨 {head}")
-                self.conn_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
+                state, color = "● 연결됨 - 잠금 안 씀", "#2e7d32"
+            board = f"{info.board.name} ({info.board.summary})"
+            if info.board_info is None:
+                board += " · 보드 정보 없음"
+            lines = [state, f"{board} / 용량 {info.capacity}바이트", info.fw_text]
+            self.conn_label.setToolTip(self.client.transport.description if self.client.transport else "")
             self.connect_btn.setText("연결 끊기")
         else:
-            self.conn_label.setText("○ 연결 안 됨")
-            self.conn_label.setStyleSheet("font-weight: bold; color: #757575;")
+            lines, color = ["○ 연결 안 됨"], "#757575"
+            self.conn_label.setToolTip("")
             self.connect_btn.setText("연결")
+        head, *rest = (html.escape(line) for line in lines)
+        self.conn_label.setText("<br>".join([f'<b style="color: {color};">{head}</b>'] + rest))
         self._refresh_buttons()
 
     def _refresh_buttons(self) -> None:

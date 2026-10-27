@@ -239,13 +239,21 @@ class MacroEditor(QWidget):
             self.status.setText("\n".join(lines))
 
 
+# (topic, explanation) rows of the help under the pattern buttons
 LOCK_HELP = (
-    "키보드를 꽂으면 잠긴 상태(LED 꺼짐, 가끔 빨간색 깜빡)로 시작하고 키를 눌러도 반응하지 않습니다. "
-    "노브를 2초 누르면 빨간색이 계속 켜지고, 이때 키/노브를 이 순서대로 입력하면 파란색으로 풀립니다. "
-    "풀린 상태에서 노브를 2초 누르고 같은 패턴을 입력하면 다시 잠깁니다(5번 틀려도 잠김). "
-    "잠긴 동안에는 GUI에서 읽기·테스트 입력도 할 수 없고, 풀기를 5번 틀리면 빨간색이 계속 깜빡이며 다시 꽂아야 합니다. "
-    "비워 두면 잠금을 쓰지 않습니다."
+    ("꽂으면", "잠김 (LED 꺼짐, 가끔 빨강 깜빡) · 키를 눌러도 반응 없음 · GUI 읽기·테스트 입력 안 됨"),
+    ("풀기", "노브 2초 → 빨강 켜짐 → 패턴 입력 → 파랑"),
+    ("다시 잠그기", "풀린 상태에서 노브 2초 → 같은 패턴 (5번 틀려도 잠김)"),
+    ("자동 잠금", "풀린 뒤 정한 시간 동안 입력이 없으면 잠김 (0분 = 안 함)"),
+    ("5번 틀리면", "빨강이 계속 깜빡이고 입력을 막음 → 다시 꽂기"),
+    ("비워 두면", "잠금을 쓰지 않음"),
 )
+
+
+def help_table(rows: tuple[tuple[str, str], ...]) -> str:
+    cells = "".join(f"<tr><td style='padding-right: 8px;'><b>{topic}</b></td><td>{text}</td></tr>"
+                    for topic, text in rows)
+    return f"<table cellspacing='0' cellpadding='1'>{cells}</table>"
 
 AUTOLOCK_HELP = (
     "풀린 뒤 키/노브 입력과 GUI 작업(읽기·저장·테스트 입력)이 이 시간 동안 없으면 저절로 잠깁니다. "
@@ -291,7 +299,8 @@ class LockPatternEditor(QGroupBox):
         top.addStretch(1)
         top.addWidget(self.status)
 
-        help_label = QLabel(LOCK_HELP)
+        help_label = QLabel(help_table(LOCK_HELP))
+        help_label.setTextFormat(Qt.RichText)
         help_label.setWordWrap(True)
         help_label.setStyleSheet("color: palette(placeholder-text); font-size: 11px;")
 
@@ -302,6 +311,7 @@ class LockPatternEditor(QGroupBox):
         self.autolock_spin.setToolTip(AUTOLOCK_HELP)
         self.autolock_spin.valueChanged.connect(self.autolockChanged.emit)
         self.autolock_note = QLabel()
+        self.autolock_note.setWordWrap(True)
         self.autolock_note.setStyleSheet("color: palette(placeholder-text); font-size: 11px;")
         autolock = QHBoxLayout()
         autolock.addWidget(QLabel("자동 잠금:"))

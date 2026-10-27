@@ -116,7 +116,7 @@ stateDiagram-v2
 | [firmware/test_pinmap/](firmware/test_pinmap/) | 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
 | [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
-| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록) |
+| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록), `capture_screens.py`(문서용 GUI 화면 캡처) |
 
 ## 빠른 시작
 
