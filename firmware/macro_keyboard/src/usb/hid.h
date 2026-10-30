@@ -10,7 +10,9 @@ extern "C" {
 void USBInit(void);
 
 // Keyboard (interface 0)
-uint8_t kb_busy(void);
+uint8_t kb_ready(void); // configured by a host
+uint8_t kb_busy(void);  // last report not yet collected by the host
+void kb_cancel(void);   // withdraw a report the host does not collect
 uint8_t kb_send(__data uint8_t modifiers, __data uint8_t keycode);
 
 // Vendor HID (interface 1)

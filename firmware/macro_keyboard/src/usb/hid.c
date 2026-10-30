@@ -74,7 +74,18 @@ static uint8_t waitIdle(volatile __xdata uint8_t *busy) {
   return 1;
 }
 
+uint8_t kb_ready(void) { return UsbConfig != 0; }
+
 uint8_t kb_busy(void) { return UpPoint1_Busy; }
+
+void kb_cancel(void) {
+  __data uint8_t usbIntCopy = USB_INT_EN;
+  USB_INT_EN &= ~bUIE_TRANSFER; // Disable USB interrupts
+  UEP1_T_LEN = 0;
+  UEP1_CTRL = UEP1_CTRL & ~MASK_UEP_T_RES | UEP_T_RES_NAK; // withdraw it
+  UpPoint1_Busy = 0;
+  USB_INT_EN = usbIntCopy;
+}
 
 uint8_t kb_send(__data uint8_t modifiers, __data uint8_t keycode) {
   if (UsbConfig == 0) {

@@ -102,6 +102,13 @@ static __data uint8_t needRelease;
 static __data uint8_t delaying;
 static __data uint16_t delayMs;
 static __data uint32_t delayStart;
+static __data uint16_t sentAt;  // last kb_send()
+static __data uint8_t stalled;  // a report was withdrawn in this playback
+
+// The host collects a report within a few ms (1 ms polling). One still
+// waiting after this long will not be collected: the host stopped polling
+// without a bus reset, e.g. a KVM switched away.
+#define SEND_TIMEOUT_MS 250
 
 // Result of parsing one token
 static __data uint8_t tokMods;
@@ -289,6 +296,13 @@ uint8_t macro_enqueue(__data uint8_t slot) {
 uint8_t macro_busy(void) { return active || queueCount; }
 
 void macro_task(void) {
+  // No host (bus reset, e.g. a KVM switch, or not configured yet): drop
+  // everything rather than type the rest into whichever host comes next
+  if (!kb_ready()) {
+    queueCount = 0;
+    active = 0;
+    return;
+  }
   if (!active) {
     __data uint8_t slot;
     if (queueCount == 0) {
@@ -302,6 +316,7 @@ void macro_task(void) {
     pos = 0;
     needRelease = 0;
     delaying = 0;
+    stalled = 0;
     active = textLen != 0;
     return;
   }
@@ -313,10 +328,21 @@ void macro_task(void) {
     delaying = 0;
   }
   if (kb_busy()) {
+    if ((uint16_t)((uint16_t)millis() - sentAt) < SEND_TIMEOUT_MS) {
+      return;
+    }
+    // Not collected: drop it, the rest of this text and the queue. One
+    // release try first, so no key stays down if the press got through.
+    kb_cancel();
+    queueCount = 0;
+    pos = textLen;
+    needRelease = !stalled;
+    stalled = 1;
     return;
   }
   if (needRelease) {
     kb_send(0, 0);
+    sentAt = (uint16_t)millis();
     needRelease = 0;
     return;
   }
@@ -328,6 +354,7 @@ void macro_task(void) {
   switch (nextToken()) {
   case TOK_KEY:
     kb_send(tokMods, tokKey);
+    sentAt = (uint16_t)millis();
     needRelease = 1;
     break;
   case TOK_DELAY:

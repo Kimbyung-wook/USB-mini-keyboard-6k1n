@@ -223,6 +223,20 @@ def main() -> int:
         lines = run(exe, out, p.encode_blob(full), extra=["tail", str(small)])
         check("old bytes past a new blob are blanked", lines[-1], "tail dirty 0")
 
+        # The host stops collecting reports (KVM switched away) or resets the
+        # bus while typing: the rest and the queued second copy are dropped,
+        # and typing works again once the host is back
+        hi = p.encode_blob(["Hi!"] + [""] * 8)
+        hi_keys = keys((SHIFT, 0x0b), (0, 0x0c), (SHIFT, 0x1e))
+        for n, typed in ((1, ""), (3, "02:0b "), (4, "02:0b 00:0c ")):
+            got = slot_lines(run(exe, out, hi, extra=["stall", str(n)]))
+            check(f"stall at report {n}: dropped after the timeout", got[0],
+                  f"{typed}lost cancel lost cancel")
+            check(f"stall at report {n}: types again", got[1], hi_keys)
+        got = slot_lines(run(exe, out, hi, extra=["reset", "3"]))
+        check("bus reset: the rest is dropped", got[0], keys((SHIFT, 0x0b), (0, 0x0c)))
+        check("bus reset: types again", got[1], hi_keys)
+
     print("all passed" if failures == 0 else f"{failures} failed")
     return 1 if failures else 0
 

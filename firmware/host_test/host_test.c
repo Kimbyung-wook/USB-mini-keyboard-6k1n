@@ -2,6 +2,7 @@
 // Usage: host_test <blob.bin> [caps]
 //        host_test <blob.bin> lock <inputs>...
 //        host_test <blob.bin> tail <blob2.bin>
+//        host_test <blob.bin> stall|reset <n>
 // Stages and commits the blob in 56-byte chunks, then types every slot and
 // prints the key reports, e.g. "slot 0: 02:0b 00:08 D50 ...".
 // "lock": each argument is a sequence of input numbers (0-8) entered on the
@@ -10,6 +11,10 @@
 // without input (auto-lock);
 // prints the lock state after each. "tail": commits blob2 over the blob and counts the
 // DataFlash bytes past blob2 that are not blank.
+// "stall": from the n-th report on the host collects nothing (KVM switched
+// away without a reset); "reset": a bus reset after the n-th report. Each
+// types slot 0 with a second slot 0 queued, then slot 0 again once the
+// host is back.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,8 +40,26 @@ void eeprom_write_byte(uint8_t addr, uint8_t val) {
   if (addr < 128) eeprom[addr] = val;
 }
 
-uint8_t kb_busy(void) { return 0; }
+static int sends = 0;
+static int stallAt = 0;  // > 0: reports from this one on are not collected
+static int resetAt = 0;  // > 0: bus reset after this report
+static uint8_t busy = 0;
+static uint8_t ready = 1;
+
+uint8_t kb_ready(void) { return ready; }
+uint8_t kb_busy(void) { return busy; }
+void kb_cancel(void) {
+  printf(" cancel");
+  busy = 0;
+}
 uint8_t kb_send(uint8_t modifiers, uint8_t keycode) {
+  sends++;
+  if (resetAt && sends == resetAt) ready = 0;
+  if (stallAt && sends >= stallAt) {
+    printf(" lost"); // never collected: the host does not see it
+    busy = 1;
+    return 1;
+  }
   // One loop iteration = 1 ms here; a long gap means a {DELAY:n} ran
   if (now - lastSend >= 10) printf(" D%u", (unsigned)(now - lastSend));
   lastSend = now;
@@ -107,6 +130,38 @@ static void runLock(int count, char **inputs) {
   }
 }
 
+// Runs the queued slots until playback ends (at most 10 s)
+static void play(void) {
+  uint32_t start = now;
+  lastSend = now;
+  while (macro_busy() && now - start < 10000) {
+    macro_task();
+    now++;
+  }
+  if (macro_busy()) { printf(" !still-busy"); errors++; }
+}
+
+static void runStall(int reset, int n) {
+  if (reset) resetAt = n; else stallAt = n;
+  printf("slot 0:");
+  macro_enqueue(0);
+  macro_enqueue(0);
+  play();
+  printf("\n");
+  // The host is back
+  stallAt = 0;
+  resetAt = 0;
+  busy = 0;
+  ready = 1;
+  pressed = 0;
+  printf("slot 1:");
+  macro_enqueue(0);
+  play();
+  if (pressed) { printf(" !left-pressed"); errors++; }
+  printf("\n");
+  printf("errors %d\n", errors);
+}
+
 int main(int argc, char **argv) {
   static uint8_t blob[512];
   size_t n;
@@ -129,6 +184,10 @@ int main(int argc, char **argv) {
 
   if (argc > 2 && !strcmp(argv[2], "lock")) {
     runLock(argc - 3, argv + 3);
+    return 0;
+  }
+  if (argc > 3 && (!strcmp(argv[2], "stall") || !strcmp(argv[2], "reset"))) {
+    runStall(!strcmp(argv[2], "reset"), atoi(argv[3]));
     return 0;
   }
   if (argc > 3 && !strcmp(argv[2], "tail")) {

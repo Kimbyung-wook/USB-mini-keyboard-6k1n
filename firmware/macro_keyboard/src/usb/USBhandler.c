@@ -23,6 +23,8 @@ __xdata __at (EP2_ADDR + 64) uint8_t Ep2InBuffer[64]; // IN half of Ep2Buffer
 __data uint16_t SetupLen;
 __data uint8_t SetupReq;
 volatile __xdata uint8_t UsbConfig;
+extern volatile __xdata uint8_t UpPoint1_Busy; // hid.c
+extern volatile __xdata uint8_t UpPoint2_Busy;
 
 __code uint8_t *__data pDescr;
 
@@ -183,6 +185,7 @@ void USB_EP0_SETUP() {
           case 0x82:
             UEP2_CTRL =
                 UEP2_CTRL & ~(bUEP_T_TOG | MASK_UEP_T_RES) | UEP_T_RES_NAK;
+            UpPoint2_Busy = 0; // the queued report is dropped with it
             break;
           case 0x02:
             UEP2_CTRL =
@@ -191,6 +194,7 @@ void USB_EP0_SETUP() {
           case 0x81:
             UEP1_CTRL =
                 UEP1_CTRL & ~(bUEP_T_TOG | MASK_UEP_T_RES) | UEP_T_RES_NAK;
+            UpPoint1_Busy = 0;
             break;
           case 0x01:
             UEP1_CTRL =
@@ -452,6 +456,11 @@ void USBInterrupt(void) { // inline not really working in multiple files in SDCC
     UIF_BUS_RST = 0;
 
     UsbConfig = 0;
+    // A report queued before the reset is never collected now (the
+    // endpoints are back to NAK): without this, a reset during typing (e.g.
+    // a KVM switch) left the keyboard endpoint busy until replugged
+    UpPoint1_Busy = 0;
+    UpPoint2_Busy = 0;
 
     // Clear interrupt flag
   }
