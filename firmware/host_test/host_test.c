@@ -143,7 +143,7 @@ static void runLock(int count, char **inputs) {
           lock_task();
         }
       } else {
-        lock_activity(); // as onInput() in the sketch
+        lock_activity(); // as input_action() in src/input.c
         lock_input((uint8_t)(*s - '0'));
       }
     }
