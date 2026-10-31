@@ -266,12 +266,36 @@ def test_dialog_asks_before_unchecked_firmware(qapp, tmp_path, fid, warning):
     assert len(dlg.asked) == 1 and warning in dlg.asked[0]
 
 
-def test_dialog_unknown_board_cannot_flash(qapp, tmp_path):
+def test_dialog_unknown_board_flashes_the_picked_board(qapp, tmp_path):
     from gui import protocol as p
     dlg = make_dialog(tmp_path, [chip()], keyboard=p.Board(keys=9, knobs=0, rows=3, name="MK9K0N"))
-    assert not dlg.start_btn.isEnabled() and not dlg.start()
-    assert "보드 목록에 없는 키보드(MK9K0N)" in dlg.chip_status.text()
-    assert "보드 목록에 없는" in dlg.board_label.text()
+    assert not dlg.identified and "목록에 없는 보드(MK9K0N)" in dlg.board_label.text()
+    assert dlg.spec.name == "MK6K1N" and dlg.start_btn.isEnabled()
+    dlg.answer = False
+    assert not dlg.start() and "식별하지 못했습니다" in dlg.asked[0]
+
+
+def test_dialog_unidentified_keyboard_picks_board(qapp, tmp_path, monkeypatch):
+    from gui import flash_dialog
+    monkeypatch.setattr(flash_dialog, "BUILD_DIR", tmp_path)
+    make_hex(tmp_path / "macro_keyboard-MK6K1NL.hex", 100, fid="MKFW1:MK6K1NL:CH552:1.5.0")
+    dlg = make_dialog(tmp_path, [chip()], identified=False)    # factory firmware, 1.2.x, nothing
+    dlg.auto_hex = True
+    assert "식별할 수 없습니다" in dlg.board_label.text() and "키 E" in dlg.hint.text()
+    dlg.board_combo.setCurrentIndex([b.name for b in boards.BOARDS].index("MK6K1NL"))
+    assert dlg.spec.name == "MK6K1NL" and "저항" in dlg.hint.text()
+    assert dlg.path_edit.text().endswith("macro_keyboard-MK6K1NL.hex") and dlg.hex_warning == ""
+    dlg.answer = False
+    assert not dlg.start() and "MK6K1NL" in dlg.asked[0]       # asks once, then flashes on yes
+
+
+def test_dialog_identified_keyboard_asks_for_another_board(qapp, tmp_path):
+    dlg = make_dialog(tmp_path, [chip()])                       # MK6K1N said so in HELLO
+    assert dlg.identified and dlg.spec.name == "MK6K1N" and not dlg.other_board
+    dlg.board_combo.setCurrentIndex([b.name for b in boards.BOARDS].index("MK6K1NL"))
+    assert dlg.other_board and "다른 보드를 골랐습니다" in dlg.board_label.text()
+    dlg.answer = False
+    assert not dlg.start() and "MK6K1N인데 MK6K1NL" in dlg.asked[0]
 
 
 def test_dialog_marks_the_keyboard_that_was_connected(qapp, tmp_path):

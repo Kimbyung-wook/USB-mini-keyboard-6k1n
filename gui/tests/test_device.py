@@ -290,3 +290,16 @@ def test_mock_relock_rules():
     assert mock.locked and mock.lock_fails == 0
     mock.enter_pattern(LOCK)
     assert not mock.locked
+
+
+def test_short_lock_refused_by_old_firmware():
+    from gui.device import DeviceClient, DeviceError
+    from gui.transport import MockDevice
+    old = DeviceClient(MockDevice(capacity=128, fw=(1, 5, 0)))
+    old.hello()
+    with pytest.raises(DeviceError, match="4단계 이상"):
+        old.write_config([""] * 9, lock=[0, 6])
+    new = DeviceClient(MockDevice(capacity=128, fw=(1, 6, 0)))
+    new.hello()
+    new.write_config([""] * 9, lock=[0, 6])
+    assert new.read_config().lock == [0, 6]

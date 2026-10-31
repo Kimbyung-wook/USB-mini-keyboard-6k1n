@@ -205,7 +205,13 @@ def main() -> int:
         check("slots still type next to the lock slot", f"{got[0]} | {got[1]} | {got[8]}",
               keys((SHIFT, 0x0b), (0, 0x0c), (0, 0x28)) + " | " + keys((CTRL, 0x06)) + " | (empty)")
 
-        for name, bad_lock in (("3-step lock", [0, 1, 2]), ("9-step lock", [0] * 9),
+        # 2-step pattern (1.6.0; 4 steps at least before)
+        lines = run(exe, out, p.encode_blob(short, [3, 6]), extra=["lock", "H36", "H", "36", "H3"])
+        check("2-step lock commits", lines[2], "commit status 0")
+        check("2-step lock: unlock, re-lock, a 1-step try stays locked",
+              " | ".join(lock_states(lines)[1:]), "open 1 | relock 1 | locked 3 | unlocking 3")
+
+        for name, bad_lock in (("1-step lock", [0]), ("9-step lock", [0] * 9),
                                ("lock step 9", [0, 1, 2, 9])):
             # Built by hand: encode_blob refuses invalid patterns
             payload = bytearray()

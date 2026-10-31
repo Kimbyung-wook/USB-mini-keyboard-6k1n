@@ -172,11 +172,12 @@ def test_lock_editor_builds_pattern(win):
     win.connect_device()
     ed = win.lock_editor
     assert "없음" in ed.display.text()
-    for slot in (0, 3):
-        ed.input_buttons[slot].click()
-    assert win.lock == [0, 3] and win.has_unsaved()
-    assert "4단계 이상" in ed.status.text()
+    ed.input_buttons[0].click()
+    assert win.lock == [0] and win.has_unsaved()
+    assert "2단계 이상" in ed.status.text()
     assert not win.save_btn.isEnabled()
+    ed.input_buttons[3].click()
+    assert win.lock == [0, 3] and "✔ 2단계" in ed.status.text()     # 2 steps from firmware 1.6.0
     ed.input_buttons[p.SLOT_KNOB_CW].click()
     ed.input_buttons[p.SLOT_KNOB_PRESS].click()
     assert ed.display.text() == "A → D → ↻ → ●"

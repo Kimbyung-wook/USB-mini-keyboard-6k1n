@@ -3,7 +3,7 @@
 
 // Firmware version reported by HELLO and the USB device descriptor
 #define FW_MAJOR 1
-#define FW_MINOR 5
+#define FW_MINOR 6
 #define FW_PATCH 0
 
 // Build date reported by HELLO, passed in by tools/build_fw.ps1
@@ -63,7 +63,7 @@
 // Lock pattern (docs/PROTOCOL.md "패턴 암호"): optional last slot of the
 // blob, one byte per step holding the slot number of the input
 #define SLOT_LOCK SLOT_COUNT
-#define LOCK_MIN_STEPS 4
+#define LOCK_MIN_STEPS 2          // 4 before 1.6.0
 #define LOCK_MAX_STEPS 8
 #define LOCK_MAX_FAILS 5          // then inputs are ignored until replugged
 #define LOCK_HOLD_MS 2000          // knob hold that starts a pattern entry (3000 before 1.3.1)

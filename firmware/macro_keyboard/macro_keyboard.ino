@@ -15,7 +15,9 @@
     blinking, open = blue, green for a moment on every key press (and while
     typing), white flash after saving, purple before jumping to the
     bootloader. With an LED under every key (MK6K1NL) only the pressed
-    key's LED turns green, the others stay blue (a knob action: all green).
+    key's LED turns green, the others stay blue (a knob action: all green),
+    and in a pattern entry (all red) the pressed key's LED goes dark for a
+    moment (a knob step: all).
   - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
     plugging in, or send BOOT from the GUI.
 
@@ -91,7 +93,11 @@ __idata uint16_t blinkAt; // start of the current locked blink period
 #endif
 #define ALL_KEYS ((1 << BOARD_KEYS) - 1)
 __idata uint8_t greenKeys; // pressed during the current typing
-__idata uint8_t ledGreen;  // keys shown green over ledColor
+__idata uint8_t darkKeys;  // pressed in a pattern entry, dark for a moment
+__idata uint16_t darkAt;
+#define ENTRY_DARK_MS 150
+__idata uint8_t ledMask;      // LEDs shown in ledMaskColor instead of ledColor
+__idata uint8_t ledMaskColor;
 #endif
 
 // millis() read once per loop(): one 32-bit read instead of one per use
@@ -108,21 +114,22 @@ __code uint8_t colorRGB[][3] = {
 };
 
 #if BOARD_KEY_LEDS
-// Every LED in color, except those in the green mask (bit i = LED i)
-void showLeds(uint8_t color, uint8_t green) {
+// Every LED in color, except those in mask (bit i = LED i) in maskColor
+void showLeds(uint8_t color, uint8_t mask, uint8_t maskColor) {
   // Resend periodically even without a change, so a frame lost at power-up
   // does not leave the LED dark
-  if (color == ledColor && green == ledGreen &&
+  if (color == ledColor && mask == ledMask && maskColor == ledMaskColor &&
       (uint16_t)(now16 - ledSentAt) < LED_REFRESH_MS) {
     return;
   }
   ledColor = color;
-  ledGreen = green;
+  ledMask = mask;
+  ledMaskColor = maskColor;
   // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
   __xdata uint8_t *p = ledData;
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
-    __code uint8_t *rgb = colorRGB[green & 1 ? COLOR_TYPING : color];
-    green >>= 1;
+    __code uint8_t *rgb = colorRGB[mask & 1 ? maskColor : color];
+    mask >>= 1;
     *p++ = rgb[1];
     *p++ = rgb[0];
     *p++ = rgb[2];
@@ -131,7 +138,7 @@ void showLeds(uint8_t color, uint8_t green) {
   ledSentAt = now16;
 }
 
-void showColor(uint8_t color) { showLeds(color, 0); }
+void showColor(uint8_t color) { showLeds(color, 0, COLOR_OFF); }
 #else
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
   // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
@@ -170,7 +177,15 @@ void updateLed() {
   if (lock_state() == LOCK_BLOCKED) {
     showColor((now16 >> BLOCKED_BLINK_SHIFT) & 1 ? COLOR_OFF : COLOR_RED);
   } else if (lock_entering()) {
+#if BOARD_KEY_LEDS
+    // The key just entered goes dark for a moment (a knob step: all)
+    if ((uint16_t)(now16 - darkAt) >= ENTRY_DARK_MS) {
+      darkKeys = 0;
+    }
+    showLeds(COLOR_RED, darkKeys, COLOR_OFF);
+#else
     showColor(COLOR_RED);
+#endif
   } else if (lock_state() == LOCK_LOCKED) {
     // 16-bit period counter instead of millis() % period (32-bit modulo)
     uint16_t sinceBlink = now16 - blinkAt;
@@ -181,7 +196,7 @@ void updateLed() {
     showColor(sinceBlink < LOCKED_BLINK_MS ? COLOR_RED : COLOR_OFF);
   } else if (macro_busy() || pressFlash) {
 #if BOARD_KEY_LEDS
-    showLeds(COLOR_IDLE, greenKeys);
+    showLeds(COLOR_IDLE, greenKeys, COLOR_TYPING);
 #else
     showColor(COLOR_TYPING);
 #endif
@@ -212,6 +227,10 @@ void jumpToBootloader() {
 void onInput(uint8_t slot) {
   lock_activity();
   if (lock_entering()) {
+#if BOARD_KEY_LEDS
+    darkKeys = slot < BOARD_KEYS ? 1 << slot : ALL_KEYS;
+    darkAt = now16;
+#endif
     lock_input(slot);
   } else if (lock_state() == LOCK_OPEN) {
     macro_enqueue(slot);

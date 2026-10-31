@@ -147,7 +147,7 @@ def test_blob_without_lock_unchanged():
     assert p.decode_blob(p.encode_blob([""] * 9)).lock == []
 
 
-@pytest.mark.parametrize("lock", [[0, 1, 2], [0] * 9, [0, 1, 2, 9]])
+@pytest.mark.parametrize("lock", [[0], [0] * 9, [0, 1, 2, 9]])
 def test_invalid_lock_rejected(lock):
     assert p.lock_error(lock)
     with pytest.raises(p.BlobError):
@@ -185,3 +185,10 @@ def test_hello_without_build_date():
     assert info.build_date is None and info.fw_text == "펌웨어 v1.1.0 (빌드 날짜 없음)"
     v1 = p.parse_hello_result(bytes([1, 1, 0, 9, 128, 0]))
     assert v1.fw_text == "펌웨어 v1.0"
+
+
+def test_two_step_lock_needs_firmware_1_6():
+    assert p.lock_error([0, 6]) is None and p.decode_blob(p.encode_blob([""] * 9, [0, 6])).lock == [0, 6]
+    old = p.HelloInfo(2, 1, 5, 9, 128, fw_patch=0)
+    new = p.HelloInfo(2, 1, 6, 9, 128, fw_patch=0)
+    assert old.lock_min_steps == 4 and new.lock_min_steps == 2

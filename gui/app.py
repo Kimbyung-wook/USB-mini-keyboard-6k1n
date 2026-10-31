@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         self._connect_fn = connect_fn
         self.client: DeviceClient | None = None
         self.board = p.DEFAULT_BOARD     # layout of the connected (or last) keyboard
+        self.board_identified = False    # that keyboard sent its board info (HELLO)
         self.slots: list[str] = [""] * self.board.slot_count
         self.baseline: list[str] = [""] * self.board.slot_count   # what the device holds
         self.lock: list[int] = []
@@ -375,6 +376,7 @@ class MainWindow(QMainWindow):
             client.close()
             return False
         self.client = client
+        self.board_identified = client.info.board_info is not None
         self.set_board(client.info.board)
         self._refresh_all()
         self.statusBar().showMessage("장치에 연결했습니다", 3000)
@@ -648,7 +650,7 @@ class MainWindow(QMainWindow):
 
     def make_firmware_dialog(self) -> FirmwareDialog:
         return FirmwareDialog(self.prepare_bootloader, self.flash_command_fn, self,
-                              keyboard=self.board)
+                              keyboard=self.board, identified=self.board_identified)
 
     def update_firmware(self) -> bool:
         if self._mock:
@@ -705,15 +707,16 @@ def parse_board(text: str) -> p.Board:
 
 # The mock acts like the newest firmware
 MOCK_FEATURES = p.BOARD_FEATURE_RGB_LED | p.BOARD_FEATURE_LOCK | p.BOARD_FEATURE_AUTO_LOCK
+MOCK_FW = p.SHORT_LOCK_FIRMWARE      # takes 2-step patterns
 
 
 def build_window(use_mock: bool, mock_board: p.Board | None = None) -> MainWindow:
     if use_mock:
         if mock_board is None:
-            mock = MockDevice(capacity=DEFAULT_CAPACITY, storage=p.encode_blob(SAMPLE_SLOTS),
+            mock = MockDevice(capacity=DEFAULT_CAPACITY, fw=MOCK_FW, storage=p.encode_blob(SAMPLE_SLOTS),
                               board=p.Board(features=MOCK_FEATURES))
         else:
-            mock = MockDevice(capacity=DEFAULT_CAPACITY, board=mock_board)
+            mock = MockDevice(capacity=DEFAULT_CAPACITY, fw=MOCK_FW, board=mock_board)
         return MainWindow(make_mock_connector(mock), auto_reconnect=False, mock_label="모의 장치")
     return MainWindow(HidTransport.open_first, auto_reconnect=True)
 

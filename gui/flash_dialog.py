@@ -1,8 +1,11 @@
 """Firmware update dialog: pick a .hex, find the chip in the bootloader, then flash.
 
-What to flash with comes from the board list (gui/boards.py): the keyboard
-that was connected last (its HELLO board, or the default one) picks the chip,
-the uploader options and how to reach the bootloader.
+What to flash with comes from the board list (gui/boards.py): the board
+picked in the window gives the chip, the uploader options and how to reach
+the bootloader. It starts at the keyboard that was connected last (its HELLO
+board). A keyboard that could not be identified (factory firmware, firmware
+without board info, nothing connected, a board not in the list) still gets
+flashed: the user picks the board and confirms it.
 """
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ from typing import Callable
 
 from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -44,7 +47,7 @@ class FirmwareDialog(QDialog):
     def __init__(self, prepare: Prepare, command_fn: CommandFn | None = None,
                  parent: QWidget | None = None, hex_path: str | Path | None = None,
                  scan_fn: ScanFn | None = None, auto_scan: bool = True,
-                 keyboard: p.Board = p.DEFAULT_BOARD):
+                 keyboard: p.Board = p.DEFAULT_BOARD, identified: bool = True):
         super().__init__(parent)
         self.setWindowTitle("펌웨어 업데이트")
         self.resize(640, 560)
@@ -57,13 +60,22 @@ class FirmwareDialog(QDialog):
         self.hex: flasher.HexInfo | None = None
         self.chips: list[bootloader.ChipInfo] = []
         self.scan_error = ""
-        # The keyboard being updated: HELLO's board, its entry in the board list
+        # The keyboard connected last (HELLO's board) and whether it told us
+        # which board it is; the board to flash is picked in board_combo
         self.keyboard = keyboard
-        self.spec = boards.find(keyboard.name)
-        self.chip = chips.find(keyboard.chip_id)
-        self.boot_hint = self.spec.boot_hint if self.spec else "업데이트 모드 진입 방법대로"
+        known = boards.find(keyboard.name)
+        self.identified = identified and known is not None
+        self.auto_hex = hex_path is None    # the file follows the board until one is chosen
 
-        self.board_label = QLabel(self._board_text())
+        self.board_combo = QComboBox()
+        for spec in boards.BOARDS:
+            self.board_combo.addItem(f"{spec.name} · {spec.description}", spec.name)
+        self.board_combo.setCurrentIndex(boards.BOARDS.index(known) if known else 0)
+        self._pick_board()
+        board_row = QHBoxLayout()
+        board_row.addWidget(QLabel("장입할 보드:"))
+        board_row.addWidget(self.board_combo, 1)
+        self.board_label = QLabel()
         self.board_label.setWordWrap(True)
 
         self.path_edit = QLineEdit()
@@ -101,10 +113,7 @@ class FirmwareDialog(QDialog):
         chip_buttons.addWidget(self.boot_btn)
         chip_buttons.addWidget(self.scan_btn)
 
-        self.hint = QLabel(
-            "키보드가 연결되어 있고 잠금이 풀려 있으면 [업데이트 모드로 전환]을 누르세요. "
-            f"잠겨 있거나 연결되어 있지 않으면 키보드를 뽑았다가 <b>{self.boot_hint}</b> 다시 꽂으세요. "
-            "칩이 목록에 나타나면 [장입]을 누릅니다. 키별 문자열과 패턴 암호는 그대로 남습니다.")
+        self.hint = QLabel()
         self.hint.setWordWrap(True)
 
         self.stage_label = QLabel("대기")
@@ -126,6 +135,7 @@ class FirmwareDialog(QDialog):
         buttons.addWidget(self.close_btn)
 
         lay = QVBoxLayout(self)
+        lay.addLayout(board_row)
         lay.addWidget(self.board_label)
         lay.addLayout(row)
         lay.addWidget(self.size_label)
@@ -143,9 +153,11 @@ class FirmwareDialog(QDialog):
         self.scan_timer.setInterval(SCAN_INTERVAL_MS)
         self.scan_timer.timeout.connect(self.scan)
 
+        self._show_board()
         start = hex_path or default_hex(self.spec)
         if start:
             self.set_hex(start)
+        self.board_combo.currentIndexChanged.connect(self.board_changed)
         self.scan()
         if auto_scan:
             self.scan_timer.start()
@@ -154,12 +166,45 @@ class FirmwareDialog(QDialog):
     def hex_size(self) -> int:
         return self.hex.size if self.hex else 0
 
-    def _board_text(self) -> str:
+    # ------------------------------------------------------------ board
+    def _pick_board(self) -> None:
+        self.spec = boards.find(self.board_combo.currentData())
+        self.chip = self.spec.chip
+        self.boot_hint = self.spec.boot_hint
+
+    @property
+    def other_board(self) -> bool:
+        """The picked board is not the one the keyboard said it is."""
+        return self.identified and self.spec.name != self.keyboard.name
+
+    def _show_board(self) -> None:
         k = self.keyboard
-        chip = chips.name_of(k.chip_id)
-        if self.spec is None:
-            return f"키보드: {k.name} ({chip}, {k.summary}) · 보드 목록에 없는 키보드"
-        return f"키보드: {k.name} · {self.spec.description} · 업데이트 모드: {self.boot_hint} 꽂기"
+        if not self.identified:
+            what = (f"목록에 없는 보드({k.name})" if boards.find(k.name) is None
+                    else "공장 펌웨어, 보드 정보가 없는 펌웨어(1.2.x 이하), 또는 연결 안 됨")
+            self.board_label.setText(
+                f"⚠ 연결된 키보드를 식별할 수 없습니다({what}). 장입할 보드를 직접 고르세요. "
+                "고른 보드가 맞는지 키보드를 확인하세요.")
+            self.board_label.setStyleSheet(f"color: {ORANGE};")
+        elif self.other_board:
+            self.board_label.setText(f"⚠ 연결되어 있던 키보드는 {k.name}입니다. 다른 보드를 골랐습니다.")
+            self.board_label.setStyleSheet(f"color: {ORANGE};")
+        else:
+            self.board_label.setText(f"연결되어 있던 키보드: {k.name} · 업데이트 모드: {self.boot_hint} 꽂기")
+            self.board_label.setStyleSheet("")
+        hint = ("키보드가 연결되어 있고 잠금이 풀려 있으면 [업데이트 모드로 전환]을 누르세요. "
+                f"잠겨 있거나 연결되어 있지 않으면 키보드를 뽑았다가 <b>{self.boot_hint}</b> 다시 꽂으세요. ")
+        if not self.identified and self.spec.factory_boot:
+            hint += f"처음 설치(공장 펌웨어)라면: {self.spec.factory_boot}. "
+        self.hint.setText(hint + "칩이 목록에 나타나면 [장입]을 누릅니다. 키별 문자열과 패턴 암호는 그대로 남습니다.")
+
+    def board_changed(self) -> None:
+        self._pick_board()
+        self._show_board()
+        start = default_hex(self.spec) if self.auto_hex else self.path_edit.text()
+        if start:
+            self.set_hex(start)
+        self._refresh()
 
     # ------------------------------------------------------------ dialogs (overridable in tests)
     def choose_hex_path(self) -> str:
@@ -174,6 +219,7 @@ class FirmwareDialog(QDialog):
     def browse(self) -> None:
         path = self.choose_hex_path()
         if path:
+            self.auto_hex = False
             self.set_hex(path)
 
     def set_hex(self, path: str | Path) -> bool:
@@ -182,12 +228,12 @@ class FirmwareDialog(QDialog):
         self.hex = None
         try:
             if self.chip is None:
-                raise flasher.FlashError(f"이 키보드의 칩({chips.name_of(self.keyboard.chip_id)})을 모릅니다")
+                raise flasher.FlashError(f"{self.spec.name}의 칩({self.spec.chip_name})을 모릅니다")
             info = flasher.check_hex(path, self.chip)
             fid = info.firmware_id
             if fid and fid.chip != self.chip.name:
                 raise flasher.FlashError(
-                    f"{fid.chip}용 펌웨어입니다 ({fid.board} v{fid.version}). 이 키보드는 {self.chip.name}입니다")
+                    f"{fid.chip}용 펌웨어입니다 ({fid.board} v{fid.version}). {self.spec.name}은 {self.chip.name}입니다")
         except flasher.FlashError as e:
 
             self.size_label.setText(f"✖ {e}")
@@ -211,13 +257,13 @@ class FirmwareDialog(QDialog):
 
     @property
     def hex_warning(self) -> str:
-        """Why the file may not be right for this keyboard ("" when it is)."""
+        """Why the file may not be right for the picked board ("" when it is)."""
         if self.hex is None:
             return ""
         fid = self.hex.firmware_id
         if fid is None:
             return "식별 정보가 없는 펌웨어 (1.2.x 이하이거나 다른 펌웨어)"
-        if fid.board != self.keyboard.name:
+        if fid.board != self.spec.name:
             return f"다른 키보드({fid.board})용 펌웨어"
         return ""
 
@@ -273,12 +319,9 @@ class FirmwareDialog(QDialog):
             return "업데이트 모드인 칩이 없습니다"
         if len(self.chips) > 1:
             return f"칩이 {len(self.chips)}개 연결되어 있습니다. 장입할 키보드 하나만 남기세요"
-        if self.spec is None:
-            return (f"보드 목록에 없는 키보드({self.keyboard.name})라서 "
-                    "업데이트 모드 진입 설정을 알 수 없습니다. 장입할 수 없습니다")
         found = self.chips[0]
         if self.chip is None or found.chip_id != self.chip.chip_id:
-            return f"{found.part}는 이 키보드({self.keyboard.name}, {self.spec.chip_name})의 칩이 아닙니다"
+            return f"{found.part}는 고른 보드({self.spec.name}, {self.spec.chip_name})의 칩이 아닙니다"
         if not self.chip.supported:
             return f"{self.chip.name}: {self.chip.note}"
         return None
@@ -315,10 +358,16 @@ class FirmwareDialog(QDialog):
     def start(self) -> bool:
         if self.hex_size == 0 or self.target is None or self.running:
             return False
-        warning = self.hex_warning
-        if warning and not self.confirm(
+        reasons = []
+        if not self.identified:
+            reasons.append(f"키보드를 식별하지 못했습니다. 고른 보드: {self.spec.name} ({self.spec.description})")
+        elif self.other_board:
+            reasons.append(f"연결되어 있던 키보드는 {self.keyboard.name}인데 {self.spec.name}를 골랐습니다")
+        if self.hex_warning:
+            reasons.append(f"{self.hex_warning}입니다")
+        if reasons and not self.confirm(
                 "펌웨어 확인",
-                f"{warning}입니다.\n이 키보드({self.keyboard.name})에 맞지 않으면 키가 동작하지 않을 수 있습니다.\n"
+                "\n".join(reasons) + "\n키보드에 맞지 않으면 키가 동작하지 않을 수 있습니다.\n"
                 f"그래도 장입할까요? (실패해도 {self.boot_hint} 꽂으면 다시 장입할 수 있습니다)"):
             return False
         try:

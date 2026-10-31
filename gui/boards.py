@@ -24,6 +24,7 @@ class BoardSpec:
     layout: Board          # keys, knobs, rows and chip as HELLO reports them
     boot_config: int       # BOOT_P15 or BOOT_P36
     boot_key: str = ""     # the key on the entry pin, e.g. "D" (BOOT_P15)
+    factory_boot: str = "" # how to reach the bootloader on the factory firmware
 
     @property
     def chip(self) -> chips.Chip | None:
@@ -50,11 +51,14 @@ class BoardSpec:
 BOARDS = (
     BoardSpec("MK6K1N", "6키 + 노브 1개 (CH552G)",
               Board(keys=6, knobs=1, rows=2, name="MK6K1N", chip_id=0x52),
-              boot_config=BOOT_P15, boot_key="D"),
+              boot_config=BOOT_P15, boot_key="D",
+              factory_boot="키 E를 누른 채 꽂으세요"),
     # Same pins as MK6K1N, with an LED under every key (firmware/test_mk6k1nl)
     BoardSpec("MK6K1NL", "6키 + 노브 1개, 키마다 LED (CH552G)",
               Board(keys=6, knobs=1, rows=2, name="MK6K1NL", chip_id=0x52),
-              boot_config=BOOT_P15, boot_key="D"),
+              boot_config=BOOT_P15, boot_key="D",
+              factory_boot="키로는 들어가지 않습니다. 칩 12번(D+)과 16번(3V3) 핀 사이에 "
+                           "1.5~2kΩ 저항을 댄 채 꽂으세요 (docs/TROUBLESHOOTING.md 2-3)"),
 )
 
 

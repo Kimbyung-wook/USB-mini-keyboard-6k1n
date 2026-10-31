@@ -1,6 +1,6 @@
 # USB-mini-keyboard-6k1n
 
-상용 CH552G 미니 매크로 키보드(키 6개 + 노브 1개)에 커스텀 펌웨어를 올려서, 키마다 **긴 문자열**을 HID 키보드 입력으로 출력하고 PC의 GUI 프로그램에서 문자열을 확인하고 수정하는 프로젝트입니다. 펌웨어 업로드, 설정, 문자열 출력을 모두 USB 포트 하나로 처리합니다.
+상용 CH552G 미니 매크로 키보드(키 6개 + 노브 1개: LED 1개인 **MK6K1N**, 키마다 LED가 있는 **MK6K1NL**, [핀 배치](docs/PINMAP.md))에 커스텀 펌웨어를 올려서, 키마다 **긴 문자열**을 HID 키보드 입력으로 출력하고 PC의 GUI 프로그램에서 문자열을 확인하고 수정하는 프로젝트입니다. 펌웨어 업로드, 설정, 문자열 출력을 모두 USB 포트 하나로 처리합니다.
 
 ## 핵심 요구사항
 
@@ -27,11 +27,12 @@
 | 보드 정보 (펌웨어 v1.3, GUI 1.3) | ✅ HELLO로 칩·키/노브 수·보드 이름을 알리고 GUI가 그 배치로 화면을 만듦. 펌웨어 업데이트 창은 보드 목록과 칩 표로 업로더 옵션을 고르고 hex의 식별 문자열을 확인 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md)) |
 | 노브 2초, 자동 잠금 (펌웨어 v1.4, GUI 1.4) | ✅ 패턴 입력 시작이 노브 2초. 풀린 뒤 N분(GUI에서 설정, 0 = 안 함) 동안 입력이 없으면 자동으로 잠김. 실제 장치에서 확인 (2026-10-27) |
 | MK6K1NL: 키마다 LED가 있는 6키 보드 (펌웨어 v1.5, GUI 1.5) | 핀은 MK6K1N과 같고 LED가 키마다 하나(`firmware/test_mk6k1nl`로 확인, 2026-10-31). 누른 키의 LED만 초록, 나머지는 파랑. 보드 파일 `mk6k1nl.h`, 펌웨어 `macro_keyboard-MK6K1NL.hex` |
+| 패턴 2~8단계, 입력 표시, 장입할 보드 고르기 (펌웨어 v1.6, GUI 1.6) | 패턴 암호를 2단계부터 쓸 수 있음(전에는 4단계). MK6K1NL은 패턴 입력 중 누른 키의 LED가 잠깐 꺼짐. 펌웨어 업데이트 창에서 장입할 보드를 고르고, 식별 못 한 키보드(공장 펌웨어 등)도 확인 후 장입 |
 | 다른 키보드 (8키, 9키 CH57x) | 계획 중 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md) 7~8절) |
 
 ## 잠금 상태도
 
-> 펌웨어 v1.2 이후의 잠금 동작입니다(v1.3.1에서 노브 3초 → 2초, v1.4에서 자동 잠금 추가). 사용 방법과 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#잠금)를 보세요. (v1.1은 잠긴 동안 키 입력을 바로 패턴으로 받았고, 다시 잠그기가 없었습니다.)
+> 펌웨어 v1.2 이후의 잠금 동작입니다(v1.3.1에서 노브 3초 → 2초, v1.4에서 자동 잠금 추가, v1.6에서 패턴 2~8단계). 사용 방법과 확인 절차는 [firmware/macro_keyboard/README.md](firmware/macro_keyboard/README.md#잠금)를 보세요. (v1.1은 잠긴 동안 키 입력을 바로 패턴으로 받았고, 다시 잠그기가 없었습니다.)
 
 ```mermaid
 stateDiagram-v2
@@ -111,6 +112,7 @@ stateDiagram-v2
 | [PLAN.md](PLAN.md) | 전체 계획, 하드웨어 조사 기록, 단계별 진행 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 펌웨어와 GUI가 공유하는 Vendor HID 설정 통신 규격 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 빌드 오류, 업로드 실패와 복구 등 실제로 겪은 문제와 해결 방법 |
+| [docs/PINMAP.md](docs/PINMAP.md) | **키보드별 핀 배치**: CH552G 핀, MK6K1N·MK6K1NL 배치와 LED 체인 다이어그램, 노브 신호 |
 | [docs/BOARD_INFO.md](docs/BOARD_INFO.md) | 보드 정보 설계: 여러 키보드(보드) 지원, 보드 목록, 칩 표, CH57x 이식 방침 |
 | [docs/FIRMWARE_SIZE.md](docs/FIRMWARE_SIZE.md) | 펌웨어 크기 줄이기 제안과 단계별 결과 |
 | [firmware/macro_keyboard/](firmware/macro_keyboard/) | 본 펌웨어 (빌드, 업로드, 동작 테스트 방법 포함) |
@@ -118,7 +120,7 @@ stateDiagram-v2
 | [firmware/test_mk6k1nl/](firmware/test_mk6k1nl/) | MK6K1NL(키마다 LED) 하드웨어 확인용 테스트 펌웨어: LED 체인 순서와 키 핀 |
 | [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
-| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록), `capture_screens.py`(문서용 GUI 화면 캡처) |
+| [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록), `capture_screens.py`(문서용 GUI 화면 캡처), `draw_pinmap.py`(문서용 보드별 핀 그림) |
 
 ## 빠른 시작
 

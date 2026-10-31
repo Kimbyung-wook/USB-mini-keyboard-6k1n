@@ -1,5 +1,7 @@
 # test_mk6k1nl: MK6K1NL 하드웨어 확인용 테스트 펌웨어
 
+> 확인한 핀 배치는 [docs/PINMAP.md](../../docs/PINMAP.md)에 다이어그램으로 정리되어 있습니다.
+
 **MK6K1NL**(6키 + 노브 1개, CH552G, 키마다 LED)의 키 핀과 LED를 확인하는 펌웨어입니다. **LED가 몇 개이고 어느 순서로 이어져 있는지** 보고, 키 핀도 [test_pinmap](../test_pinmap/README.md)처럼 함께 확인합니다. 본 펌웨어의 보드 파일은 `firmware/macro_keyboard/src/boards/mk6k1nl.h`입니다.
 
 | 보드 | 생김새 | 테스트 펌웨어 |

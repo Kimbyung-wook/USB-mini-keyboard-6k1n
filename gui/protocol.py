@@ -30,7 +30,9 @@ COMMIT_TIMEOUT_MS = 2000
 
 # Lock pattern: optional extra slot after the macro slots, one byte per step
 # holding the slot number of the input
-LOCK_MIN_STEPS = 4
+LOCK_MIN_STEPS = 2              # 4 before firmware 1.6.0 (LOCK_MIN_STEPS_OLD)
+LOCK_MIN_STEPS_OLD = 4
+SHORT_LOCK_FIRMWARE = (1, 6, 0)  # first firmware that takes 2-3 steps
 LOCK_MAX_STEPS = 8
 
 # HELLO lock flags (protocol v2)
@@ -339,6 +341,12 @@ class HelloInfo:
     @property
     def blocked(self) -> bool:
         return bool(self.lock_flags & LOCK_FLAG_BLOCKED)
+
+    @property
+    def lock_min_steps(self) -> int:
+        """Shortest pattern the firmware takes: 2 from 1.6.0, 4 before."""
+        version = (self.fw_major, self.fw_minor, self.fw_patch)
+        return LOCK_MIN_STEPS if version >= SHORT_LOCK_FIRMWARE else LOCK_MIN_STEPS_OLD
 
     @property
     def supports_autolock(self) -> bool:

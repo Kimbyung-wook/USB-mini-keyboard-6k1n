@@ -175,6 +175,9 @@ class DeviceClient:
         if lock and not info.supports_lock:
             raise DeviceError(f"펌웨어 v{info.fw_version}은 패턴 암호를 지원하지 않습니다. "
                               "펌웨어를 업데이트하거나 패턴 암호를 지우세요")
+        if lock and len(lock) < info.lock_min_steps:
+            raise DeviceError(f"펌웨어 v{info.fw_version}은 패턴 암호가 {info.lock_min_steps}단계 이상이어야 합니다. "
+                              f"펌웨어를 1.6.0 이상으로 업데이트하거나 패턴을 {info.lock_min_steps}단계 이상으로 만드세요")
         cap = info.capacity
         if check_capacity and len(blob) > cap:
             raise ConfigTooBigError(len(blob), cap)

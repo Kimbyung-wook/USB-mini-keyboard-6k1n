@@ -7,7 +7,7 @@ carries a date.
 """
 from __future__ import annotations
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 
 def build_date() -> str | None:
