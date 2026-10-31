@@ -12,8 +12,9 @@
   CH375DLL.dll is WCH's driver DLL) is bundled from the newest installed
   MCS51Tools, so [펌웨어 업데이트] works on a PC without Arduino.
 
-  Needs the GUI venv (gui\.venv) with PyInstaller installed:
-    gui\.venv\Scripts\python -m pip install pyinstaller
+  Needs the GUI venv (gui\.venv) set up from gui\requirements.txt, which
+  includes PyInstaller:
+    gui\.venv\Scripts\python -m pip install -r gui\requirements.txt
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\build_gui.ps1

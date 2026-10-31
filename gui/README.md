@@ -7,14 +7,30 @@ Python + PySide6로 만들었고, 통신 규격은 [`docs/PROTOCOL.md`](../docs/
 
 ## 설치
 
-Python 3.12 기준입니다. 저장소 루트에서:
+**Python 3.12.10** 기준입니다(저장소 루트의 `.python-version`). 저장소 루트에서:
 
 ```powershell
-python -m venv gui\.venv
+py -3.12 -m venv gui\.venv
 gui\.venv\Scripts\python -m pip install -r gui\requirements.txt
 ```
 
-필요한 패키지: `PySide6`(UI), `hidapi`(USB HID 통신, 모듈 이름 `hid`), `pytest`(테스트).
+`gui/requirements.txt`에는 실행, 테스트, exe 빌드에 쓰는 패키지가 모두 쓰던 버전 그대로 고정되어 있습니다. 이것 한 번으로 아래의 실행, 테스트, exe 빌드를 모두 할 수 있습니다.
+
+| 패키지 | 용도 |
+|---|---|
+| `PySide6` 6.12.0 | UI |
+| `hidapi` 0.15.0 | USB HID 통신 (모듈 이름 `hid`) |
+| `pytest` 9.1.1 | 테스트 |
+| `pyinstaller` 6.22.3 | exe 빌드 |
+
+나머지 줄은 위 패키지가 함께 설치하는 것들입니다. 새 PC에서도 같은 버전이 깔리도록 고정했습니다.
+
+pip로 설치하지 않는 도구:
+
+| 도구 | 필요한 작업 | 쓰던 버전 |
+|---|---|---|
+| Arduino CLI(또는 Arduino IDE) + CH55xDuino | 펌웨어 빌드(`tools\build_fw.ps1`, [펌웨어 README](../firmware/macro_keyboard/README.md)) | Arduino CLI 1.5.1, CH55xDuino 0.0.26 |
+| gcc (PATH에 있어야 함) | 펌웨어 PC 검사(`firmware\host_test\run.py`) | MinGW GCC 6.3.0 |
 
 ## 실행
 
@@ -52,12 +68,17 @@ cd gui
 
 UI 테스트는 화면 없이(`QT_QPA_PLATFORM=offscreen`) 실행됩니다.
 
-## 실행 파일(exe) 빌드
-
-저장소 폴더에서 실행합니다. 처음 한 번은 PyInstaller를 설치합니다.
+펌웨어의 저장·문자열 입력·잠금 코드는 PC에서 gcc로 검사합니다(저장소 루트에서, gcc 필요):
 
 ```powershell
-gui\.venv\Scripts\python -m pip install pyinstaller
+gui\.venv\Scripts\python firmware\host_test\run.py
+```
+
+## 실행 파일(exe) 빌드
+
+저장소 폴더에서 실행합니다. PyInstaller는 `gui\requirements.txt`로 이미 설치되어 있습니다.
+
+```powershell
 powershell -ExecutionPolicy Bypass -File tools\build_gui.ps1
 ```
 
