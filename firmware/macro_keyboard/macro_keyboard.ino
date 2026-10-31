@@ -1,6 +1,6 @@
 /*
-  macro_keyboard: firmware for the 6-key + 1-knob CH552G mini keyboard
-  (board MK6K1N, src/boards/mk6k1n.h)
+  macro_keyboard: firmware for the 6-key + 1-knob CH552G mini keyboards
+  (boards MK6K1N and MK6K1NL, src/boards/)
 
   - Interface 0: HID keyboard. Each key/knob action types the text of its
     slot (macro syntax in docs/PROTOCOL.md).
@@ -14,7 +14,8 @@
     pattern entry = solid red, blocked (five wrong unlock tries) = red
     blinking, open = blue, green for a moment on every key press (and while
     typing), white flash after saving, purple before jumping to the
-    bootloader.
+    bootloader. With an LED under every key (MK6K1NL) only the pressed
+    key's LED turns green, the others stay blue (a knob action: all green).
   - Bootloader: hold key D (ROM bootloader, P1.5) or hold the knob while
     plugging in, or send BOOT from the GUI.
 
@@ -58,6 +59,7 @@ __code int8_t encTable[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
 // code than xdata, and __data is already used by macro.c and lock.c
 __idata uint8_t encPrev;
 __idata int8_t encCount;
+#define ENC_MIN_STEPS 2 // quadrature steps that make a detent (of 4)
 
 #define COLOR_OFF 0
 #define COLOR_IDLE 1
@@ -72,9 +74,8 @@ __idata int8_t encCount;
 #define BLOCKED_BLINK_SHIFT 9   // blocked: blink period 2 x 512 ms
 #define LED_REFRESH_MS 200
 
-// Only one LED is visible, but which position in the chain it has is not
-// known, so every color is sent to 8 positions (as test_pinmap did).
-#define NUM_LEDS 8
+// Chain positions driven, from the board file
+#define NUM_LEDS BOARD_LED_COUNT
 
 __xdata uint8_t ledData[NUM_LEDS * 3];
 __idata uint8_t ledColor; // COLOR_OFF
@@ -84,6 +85,14 @@ __idata uint16_t savedAt;
 __idata uint8_t pressFlash;
 __idata uint16_t pressAt;
 __idata uint16_t blinkAt; // start of the current locked blink period
+#if BOARD_KEY_LEDS
+#if BOARD_KEYS > 8 || NUM_LEDS != BOARD_KEYS
+#error key LEDs: one LED per key, at most 8
+#endif
+#define ALL_KEYS ((1 << BOARD_KEYS) - 1)
+__idata uint8_t greenKeys; // pressed during the current typing
+__idata uint8_t ledGreen;  // keys shown green over ledColor
+#endif
 
 // millis() read once per loop(): one 32-bit read instead of one per use
 __data uint16_t now16;
@@ -98,6 +107,32 @@ __code uint8_t colorRGB[][3] = {
     {40, 0, 0},   // COLOR_RED
 };
 
+#if BOARD_KEY_LEDS
+// Every LED in color, except those in the green mask (bit i = LED i)
+void showLeds(uint8_t color, uint8_t green) {
+  // Resend periodically even without a change, so a frame lost at power-up
+  // does not leave the LED dark
+  if (color == ledColor && green == ledGreen &&
+      (uint16_t)(now16 - ledSentAt) < LED_REFRESH_MS) {
+    return;
+  }
+  ledColor = color;
+  ledGreen = green;
+  // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
+  __xdata uint8_t *p = ledData;
+  for (uint8_t i = 0; i < NUM_LEDS; i++) {
+    __code uint8_t *rgb = colorRGB[green & 1 ? COLOR_TYPING : color];
+    green >>= 1;
+    *p++ = rgb[1];
+    *p++ = rgb[0];
+    *p++ = rgb[2];
+  }
+  neopixel_show_P3_4(ledData, NUM_LEDS * 3);
+  ledSentAt = now16;
+}
+
+void showColor(uint8_t color) { showLeds(color, 0); }
+#else
 void fillLeds(uint8_t r, uint8_t g, uint8_t b) {
   // GRB order, walked with a pointer (set_pixel_for_GRB_LED multiplies i * 3)
   __xdata uint8_t *p = ledData;
@@ -119,6 +154,7 @@ void showColor(uint8_t color) {
   neopixel_show_P3_4(ledData, NUM_LEDS * 3);
   ledSentAt = now16;
 }
+#endif
 
 void updateLed() {
   if (savedFlash) {
@@ -143,8 +179,17 @@ void updateLed() {
       sinceBlink = 0;
     }
     showColor(sinceBlink < LOCKED_BLINK_MS ? COLOR_RED : COLOR_OFF);
+  } else if (macro_busy() || pressFlash) {
+#if BOARD_KEY_LEDS
+    showLeds(COLOR_IDLE, greenKeys);
+#else
+    showColor(COLOR_TYPING);
+#endif
   } else {
-    showColor(macro_busy() || pressFlash ? COLOR_TYPING : COLOR_IDLE);
+#if BOARD_KEY_LEDS
+    greenKeys = 0;
+#endif
+    showColor(COLOR_IDLE);
   }
 }
 
@@ -172,6 +217,9 @@ void onInput(uint8_t slot) {
     macro_enqueue(slot);
     pressFlash = 1; // green even for an empty slot
     pressAt = now16;
+#if BOARD_KEY_LEDS
+    greenKeys |= slot < BOARD_KEYS ? 1 << slot : ALL_KEYS;
+#endif
   }
 }
 
@@ -241,9 +289,15 @@ void scanEncoder() {
   encCount += encTable[(encPrev << 2) | curr];
   encPrev = curr;
 
-  // One action per detent, when both lines are back at rest (high)
-  if (curr == 3 && encCount != 0) {
-    onInput(encCount < 0 ? SLOT_KNOB_CW : SLOT_KNOB_CCW);
+  // One action per detent, when both lines are back at rest (high). A
+  // detent is 4 steps the same way (11 10 00 01 11); 2 or more count, so a
+  // missed sample still works. A knob left just off a detent (e.g. at 10)
+  // chatters 10 <-> 11 when the board shakes, e.g. on pressing the key next
+  // to it: that is +1/-1 and must not count (it typed CCW on MK6K1NL).
+  if (curr == 3) {
+    if (encCount >= ENC_MIN_STEPS || encCount <= -ENC_MIN_STEPS) {
+      onInput(encCount < 0 ? SLOT_KNOB_CW : SLOT_KNOB_CCW);
+    }
     encCount = 0;
   }
 }

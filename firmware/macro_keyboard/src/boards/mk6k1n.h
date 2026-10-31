@@ -2,9 +2,16 @@
 #define __MK_BOARD_H__
 
 // MK6K1N: the 6-key + 1-knob CH552G mini keyboard (docs/BOARD_INFO.md).
-// The name must match gui/boards.py.
+// The name must match gui/boards.py. MK6K1NL (mk6k1nl.h) has the same pins
+// and sets its name and LEDs before including this file.
 
+#ifndef BOARD_NAME
 #define BOARD_NAME "MK6K1N" // up to 8 ASCII characters
+// One WS2812 is fitted, at a chain position not known: every color is sent
+// to 8 positions (as test_pinmap did)
+#define BOARD_LED_COUNT 8
+#define BOARD_KEY_LEDS 0 // 1: LED i sits under key i
+#endif
 #define BOARD_CHIP "CH552"
 #define BOARD_CHIP_ID 0x52 // as the bootloader's Detect reports it
 #define BOARD_KEYS 6
@@ -22,7 +29,7 @@
 #define PIN_KNOB_SW 33 // P3.3
 #define PIN_ENC_A 30 // P3.0
 #define PIN_ENC_B 31 // P3.1
-#define PIN_LED 34   // P3.4, one WS2812 (GRB)
+#define PIN_LED 34   // P3.4, WS2812 chain (GRB)
 
 // Switch bits in slot order (keys A-F, then the knob switch). The first
 // BOARD_P1_SWITCHES are on P1, the rest on P3.

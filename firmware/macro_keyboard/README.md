@@ -71,17 +71,23 @@ powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 
 ### 버전과 빌드 날짜
 
-- **버전**은 `src/config.h`의 `FW_MAJOR`, `FW_MINOR`, `FW_PATCH`를 직접 고칩니다(지금 `1.4.1`). USB 장치 정보(bcdDevice)에도 같은 값이 들어갑니다.
+- **버전**은 `src/config.h`의 `FW_MAJOR`, `FW_MINOR`, `FW_PATCH`를 직접 고칩니다(지금 `1.5.0`). USB 장치 정보(bcdDevice)에도 같은 값이 들어갑니다.
 - **빌드 날짜**는 `tools/build_fw.ps1`이 빌드 순간의 시각을 컴파일 옵션(`-DFW_BUILD_YEAR=2026` 등)으로 넘깁니다. 컴파일러의 `__DATE__`를 쓰지 않는 이유: Arduino는 바뀌지 않은 파일을 다시 컴파일하지 않아서 예전 날짜가 남습니다.
 - GUI 연결 막대에 `펌웨어 v1.1.0 (빌드 2026-10-26 11:40)`처럼 표시됩니다. 펌웨어 1.0은 `펌웨어 v1.0`으로만 보입니다.
 
-확인 결과(2026-10-30, v1.4.1): 프로그램 8594바이트(59%), 전역 변수 359바이트(47%), 스택 122바이트. v1.4.0(8446바이트)에 USB 전송 멈춤 처리가 더해졌습니다(+148바이트). v1.3.x(8268바이트)에서 v1.4.0으로는 자동 잠금이 더해졌습니다(+178바이트). v1.2.1(8151바이트)에서 v1.3.0으로는 HELLO 보드 정보와 펌웨어 식별 문자열이 더해졌습니다(+117바이트). v1.2.0(11587바이트, 80%)에서 v1.2.1로는 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
+확인 결과(2026-10-31, v1.5.0): MK6K1N 8608바이트(60%), 전역 변수 359바이트, 스택 122바이트. MK6K1NL 8895바이트(62%), 전역 변수 352바이트, 스택 120바이트(키별 LED 표시 +287바이트). v1.4.1(8594바이트)에서 노브 판정이 바뀌었습니다(+14바이트, 한 칸 안에서 2단계 이상 같은 방향이어야 회전). v1.4.0(8446바이트)에 USB 전송 멈춤 처리가 더해졌습니다(+148바이트). v1.3.x(8268바이트)에서 v1.4.0으로는 자동 잠금이 더해졌습니다(+178바이트). v1.2.1(8151바이트)에서 v1.3.0으로는 HELLO 보드 정보와 펌웨어 식별 문자열이 더해졌습니다(+117바이트). v1.2.0(11587바이트, 80%)에서 v1.2.1로는 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
 
 ### 보드 파일
 
-칩, 키/노브 수, 키 배치 행 수, 보드 이름, 핀 배치는 **보드 파일** `src/boards/<보드>.h`에 있습니다([docs/BOARD_INFO.md](../../docs/BOARD_INFO.md) 6). 지금은 `mk6k1n.h`(이 키보드) 하나입니다.
+칩, 키/노브 수, 키 배치 행 수, 보드 이름, 핀 배치, LED 수는 **보드 파일** `src/boards/<보드>.h`에 있습니다([docs/BOARD_INFO.md](../../docs/BOARD_INFO.md) 6).
 
-- `tools/build_fw.ps1 -Board mk6k1n`이 `-DBOARD_MK6K1N`으로 보드를 고르고, 결과를 `build/macro_keyboard-MK6K1N.hex`로도 복사합니다(GUI의 펌웨어 업데이트 창이 먼저 고르는 파일). `-Board`를 빼면 `mk6k1n`입니다. Arduino IDE에서 빌드해도 `mk6k1n`이 됩니다.
+| 보드 파일 | 보드 | LED | 하드웨어 확인 |
+|---|---|---|---|
+| `mk6k1n.h` | MK6K1N: 6키 + 노브 | 눈에 보이는 LED 1개(체인 위치를 몰라 8자리에 같은 색) | [test_pinmap](../test_pinmap/README.md) |
+| `mk6k1nl.h` | MK6K1NL: 6키 + 노브, 핀은 MK6K1N과 같음 | **키마다 1개**(체인 0~5 = 키 A~F). 누른 키만 초록, 나머지는 파랑 | [test_mk6k1nl](../test_mk6k1nl/README.md) |
+
+- `mk6k1nl.h`는 이름과 LED만 정하고 핀 배치는 `mk6k1n.h`를 그대로 씁니다. LED 표시는 `BOARD_KEY_LEDS`(1 = LED i가 키 i 아래)로 나뉩니다.
+- `tools/build_fw.ps1 -Board mk6k1n`이 `-DBOARD_MK6K1N`으로 보드를 고르고, 결과를 `build/macro_keyboard-MK6K1N.hex`로도 복사합니다(GUI의 펌웨어 업데이트 창이 먼저 고르는 파일). `-Board mk6k1nl`이면 `build/macro_keyboard-MK6K1NL.hex`입니다. `-Board`를 빼면 `mk6k1n`입니다. Arduino IDE에서 빌드해도 `mk6k1n`이 됩니다.
 - 펌웨어는 HELLO 바이트 17~35로 보드 정보를 보내고([docs/PROTOCOL.md](../../docs/PROTOCOL.md)), hex 안에 식별 문자열 `MKFW1:<보드>:<칩>:<버전>`(예: `MKFW1:MK6K1N:CH552:1.3.0`)을 넣습니다. GUI는 올리기 전에 이 문자열로 보드와 칩을 확인합니다.
 - 보드 이름은 GUI의 보드 목록 `gui/boards.py`와 같아야 합니다.
 
@@ -104,7 +110,7 @@ Arduino IDE로 빌드했으면 `-Hex firmware\macro_keyboard\build\CH55xDuino.mc
 ### 1. 연결 확인
 
 1. GUI를 실행합니다: `gui\.venv\Scripts\python -m gui`
-2. 상단에 `● 연결됨 - …`, `MK6K1N (키 6 + 노브 1) / 용량 128바이트`, `펌웨어 v1.4.1 (빌드 …)`가 보이면 설정 통신이 되는 것입니다. 빌드 날짜가 방금 빌드한 시각인지도 확인하세요(새 펌웨어가 올라갔다는 표시).
+2. 상단에 `● 연결됨 - …`, `MK6K1N (키 6 + 노브 1) / 용량 128바이트`, `펌웨어 v1.5.0 (빌드 …)`가 보이면 설정 통신이 되는 것입니다. 빌드 날짜가 방금 빌드한 시각인지도 확인하세요(새 펌웨어가 올라갔다는 표시).
 3. 처음에는 "설정 없음"으로 빈 슬롯 9개가 표시됩니다.
 
 ### 2. 테스트 문자열 넣기
@@ -173,7 +179,8 @@ GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바
 |---|---|
 | `macro_keyboard.ino` | 키/노브 입력, LED, 부트로더 점프, 메인 루프 |
 | `src/config.h` | 버전, 보드 파일 고르기, 슬롯 번호, 용량, 잠금 설정값 |
-| `src/boards/mk6k1n.h` | 이 키보드의 보드 정보(칩, 키/노브 수, 이름)와 핀 배치 |
+| `src/boards/mk6k1n.h` | MK6K1N의 보드 정보(칩, 키/노브 수, 이름, LED)와 핀 배치 |
+| `src/boards/mk6k1nl.h` | MK6K1NL의 이름과 LED(키마다 1개). 핀 배치는 `mk6k1n.h` |
 | `src/lock.c/.h` | 잠금 상태, 패턴 입력 판정, 틀린 횟수, 자동 잠금 시간 |
 | `src/protocol.c/.h` | Vendor HID 명령 처리 (HELLO/READ/WRITE/COMMIT/TEST/BOOT), HELLO 보드 정보, 펌웨어 식별 문자열 |
 | `src/storage.c/.h` | DataFlash 블롭 저장, CRC 검사, 슬롯 찾기 (문자열, 패턴 암호, 설정 슬롯) |

@@ -26,6 +26,7 @@
 | 펌웨어 크기 줄이기 (v1.2.1) | ✅ 기능은 그대로 11,587 → 8,151바이트 ([docs/FIRMWARE_SIZE.md](docs/FIRMWARE_SIZE.md)) |
 | 보드 정보 (펌웨어 v1.3, GUI 1.3) | ✅ HELLO로 칩·키/노브 수·보드 이름을 알리고 GUI가 그 배치로 화면을 만듦. 펌웨어 업데이트 창은 보드 목록과 칩 표로 업로더 옵션을 고르고 hex의 식별 문자열을 확인 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md)) |
 | 노브 2초, 자동 잠금 (펌웨어 v1.4, GUI 1.4) | ✅ 패턴 입력 시작이 노브 2초. 풀린 뒤 N분(GUI에서 설정, 0 = 안 함) 동안 입력이 없으면 자동으로 잠김. 실제 장치에서 확인 (2026-10-27) |
+| MK6K1NL: 키마다 LED가 있는 6키 보드 (펌웨어 v1.5, GUI 1.5) | 핀은 MK6K1N과 같고 LED가 키마다 하나(`firmware/test_mk6k1nl`로 확인, 2026-10-31). 누른 키의 LED만 초록, 나머지는 파랑. 보드 파일 `mk6k1nl.h`, 펌웨어 `macro_keyboard-MK6K1NL.hex` |
 | 다른 키보드 (8키, 9키 CH57x) | 계획 중 ([docs/BOARD_INFO.md](docs/BOARD_INFO.md) 7~8절) |
 
 ## 잠금 상태도
@@ -113,7 +114,8 @@ stateDiagram-v2
 | [docs/BOARD_INFO.md](docs/BOARD_INFO.md) | 보드 정보 설계: 여러 키보드(보드) 지원, 보드 목록, 칩 표, CH57x 이식 방침 |
 | [docs/FIRMWARE_SIZE.md](docs/FIRMWARE_SIZE.md) | 펌웨어 크기 줄이기 제안과 단계별 결과 |
 | [firmware/macro_keyboard/](firmware/macro_keyboard/) | 본 펌웨어 (빌드, 업로드, 동작 테스트 방법 포함) |
-| [firmware/test_pinmap/](firmware/test_pinmap/) | 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
+| [firmware/test_pinmap/](firmware/test_pinmap/) | MK6K1N 하드웨어 확인용 테스트 펌웨어. **새 장치를 구하면 먼저 이걸로 점검** |
+| [firmware/test_mk6k1nl/](firmware/test_mk6k1nl/) | MK6K1NL(키마다 LED) 하드웨어 확인용 테스트 펌웨어: LED 체인 순서와 키 핀 |
 | [firmware/host_test/](firmware/host_test/) | 본 펌웨어의 저장/매크로 코드를 PC(gcc)에서 검사 |
 | [gui/](gui/) | PySide6 설정 프로그램 |
 | [tools/](tools/) | `flash.ps1`(부트로더 대기 후 자동 업로드), `usb_monitor.ps1`(USB 장치 감지 기록), `build_fw.ps1`(펌웨어 빌드, `-Board`로 보드 선택, 빌드 일자 기록), `build_gui.ps1`(GUI exe 빌드, 빌드 일자 기록), `capture_screens.py`(문서용 GUI 화면 캡처) |
@@ -128,7 +130,7 @@ stateDiagram-v2
 powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 ```
 
-결과는 `firmware\macro_keyboard\build\macro_keyboard-MK6K1N.hex`(보드 이름이 붙은 파일, GUI가 먼저 고름)와 `macro_keyboard.ino.hex`입니다.
+결과는 `firmware\macro_keyboard\build\macro_keyboard-MK6K1N.hex`(보드 이름이 붙은 파일, GUI가 먼저 고름)와 `macro_keyboard.ino.hex`입니다. 키마다 LED가 있는 보드는 `-Board mk6k1nl`로 빌드하고 결과는 `macro_keyboard-MK6K1NL.hex`입니다.
 
 **펌웨어 업로드**
 

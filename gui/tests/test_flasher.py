@@ -84,6 +84,9 @@ def test_board_list():
     assert spec.layout.slot_count == 9 and spec.chip_name == "CH552" and spec.chip.supported
     assert spec.boot_config == boards.BOOT_P15 and spec.boot_hint == "키 D를 누른 채"
     assert spec.firmware_file == "macro_keyboard-MK6K1N.hex"
+    lit = boards.find("MK6K1NL")
+    assert lit.layout.slot_count == 9 and lit.chip_name == "CH552" and lit.boot_hint == "키 D를 누른 채"
+    assert lit.firmware_file == "macro_keyboard-MK6K1NL.hex"
     assert boards.find("MK9K0N") is None
     assert all(boards.find(b.name).layout.name == b.name for b in boards.BOARDS)
     assert chips.name_of(0x54) == "CH554" and chips.name_of(0x59) == "CH559"

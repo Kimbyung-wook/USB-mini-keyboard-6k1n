@@ -51,6 +51,10 @@ BOARDS = (
     BoardSpec("MK6K1N", "6키 + 노브 1개 (CH552G)",
               Board(keys=6, knobs=1, rows=2, name="MK6K1N", chip_id=0x52),
               boot_config=BOOT_P15, boot_key="D"),
+    # Same pins as MK6K1N, with an LED under every key (firmware/test_mk6k1nl)
+    BoardSpec("MK6K1NL", "6키 + 노브 1개, 키마다 LED (CH552G)",
+              Board(keys=6, knobs=1, rows=2, name="MK6K1NL", chip_id=0x52),
+              boot_config=BOOT_P15, boot_key="D"),
 )
 
 
