@@ -1,8 +1,10 @@
-// Host test driver for firmware/macro_keyboard/src/{storage,macro,lock}.c.
+// Host test driver for firmware/macro_keyboard/src/{storage,macro,lock,
+// input,led}.c, built against the host HAL (stub/hal_host.h).
 // Usage: host_test <blob.bin> [caps]
 //        host_test <blob.bin> lock <inputs>...
 //        host_test <blob.bin> tail <blob2.bin>
 //        host_test <blob.bin> stall|reset <n>
+//        host_test <blob.bin> input <steps>...
 // Stages and commits the blob in 56-byte chunks, then types every slot and
 // prints the key reports, e.g. "slot 0: 02:0b 00:08 D50 ...".
 // "lock": each argument is a sequence of input numbers (0-8) entered on the
@@ -15,12 +17,19 @@
 // away without a reset); "reset": a bus reset after the n-th report. Each
 // types slot 0 with a second slot 0 queued, then slot 0 again once the
 // host is back.
+// "input": runs the whole loop (input, lock, macro, LEDs) 1 ms at a time
+// against fake switches and knob lines. Steps: "p<i>"/"r<i>" press/release
+// switch i (keys, then the knob switch), "e<AB>" set the knob lines (e.g.
+// e10), "w<ms>" wait; a first step "s<AB>" sets the lines at
+// power-up. Each step prints one line: "<step>:" then the key reports and
+// the LED frames sent, "L<color>.<mask>.<maskColor>" (only changes).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "Arduino.h"
-#include "../macro_keyboard/src/config.h"
+#include "../macro_keyboard/src/hal/hal.h"
+#include "../macro_keyboard/src/input.h"
+#include "../macro_keyboard/src/led.h"
 #include "../macro_keyboard/src/lock.h"
 #include "../macro_keyboard/src/macro.h"
 #include "../macro_keyboard/src/protocol.h"
@@ -28,15 +37,27 @@
 
 static uint8_t eeprom[128];
 static uint32_t now = 0;
-uint8_t keyboardLedStatus = 0;
+static uint8_t keyboardLedStatus = 0;
+static uint8_t switches = 0;    // bit i = switch i pressed
+static uint8_t encoderLines = 3; // A << 1 | B, at rest both high
+static int ledLast = -1;        // last LED frame printed
+
+uint16_t hal_ms(void) { return (uint16_t)now; }
+uint8_t hal_switches(void) { return switches; }
+uint8_t hal_encoder(void) { return encoderLines; }
+uint8_t kb_caps_lock(void) { return keyboardLedStatus & 0x02; }
+void hal_leds(uint8_t color, uint8_t mask, uint8_t maskColor) {
+  int frame = color << 16 | mask << 8 | maskColor;
+  if (frame != ledLast) printf(" L%u.%02x.%u", color, mask, maskColor);
+  ledLast = frame;
+}
 
 static int pressed = 0; // a key is down and must be released next
 static int errors = 0;
 static uint32_t lastSend = 0;
 
-uint32_t millis(void) { return now; }
-uint8_t eeprom_read_byte(uint8_t addr) { return addr < 128 ? eeprom[addr] : 0; }
-void eeprom_write_byte(uint8_t addr, uint8_t val) {
+uint8_t hal_store_read(uint8_t addr) { return addr < 128 ? eeprom[addr] : 0; }
+void hal_store_write(uint8_t addr, uint8_t val) {
   if (addr < 128) eeprom[addr] = val;
 }
 
@@ -162,6 +183,43 @@ static void runStall(int reset, int n) {
   printf("errors %d\n", errors);
 }
 
+// The firmware's loop() without USB, 1 ms per pass
+static void runLoop(uint32_t ms) {
+  for (uint32_t i = 0; i < ms; i++) {
+    now++;
+    now16 = hal_ms();
+    input_task();
+    lock_task();
+    macro_task();
+    led_task();
+  }
+}
+
+static void runInput(int count, char **steps) {
+  int first = 0;
+  if (count > 0 && steps[0][0] == 's') {      // knob lines at power-up
+    encoderLines = (uint8_t)strtol(steps[0] + 1, NULL, 2);
+    first = 1;
+  }
+  lock_init();
+  input_init();
+  printf("start:");
+  runLoop(1);
+  printf("\n");
+  for (int i = first; i < count; i++) {
+    const char *s = steps[i];
+    uint32_t wait = 1;
+    printf("%s:", s);
+    lastSend = now;
+    if (s[0] == 'p') switches |= 1 << atoi(s + 1);
+    else if (s[0] == 'r') switches &= ~(1 << atoi(s + 1));
+    else if (s[0] == 'e') encoderLines = (uint8_t)strtol(s + 1, NULL, 2);
+    else if (s[0] == 'w') wait = (uint32_t)atoi(s + 1);
+    runLoop(wait);
+    printf("\n");
+  }
+}
+
 int main(int argc, char **argv) {
   static uint8_t blob[512];
   size_t n;
@@ -184,6 +242,10 @@ int main(int argc, char **argv) {
 
   if (argc > 2 && !strcmp(argv[2], "lock")) {
     runLock(argc - 3, argv + 3);
+    return 0;
+  }
+  if (argc > 2 && !strcmp(argv[2], "input")) {
+    runInput(argc - 3, argv + 3);
     return 0;
   }
   if (argc > 3 && (!strcmp(argv[2], "stall") || !strcmp(argv[2], "reset"))) {

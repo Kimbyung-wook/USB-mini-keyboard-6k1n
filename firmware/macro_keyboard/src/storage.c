@@ -1,6 +1,5 @@
 // clang-format off
-#include <Arduino.h>
-#include "config.h"
+#include "hal/hal.h"
 #include "protocol.h"
 #include "storage.h"
 // clang-format on
@@ -113,13 +112,13 @@ static void loadStage(__data uint8_t totalLen) {
 
 void storage_init(void) {
   for (__data uint8_t i = 0; i < BLOB_CAPACITY; i++) {
-    stage[i] = eeprom_read_byte(i);
+    stage[i] = hal_store_read(i);
   }
   // A payload length over 255 is invalid anyway; 0xFF..0xFF (blank) fails too
   loadStage(stage[5] ? 0 : BLOB_HEADER_SIZE + stage[4]);
 }
 
-uint8_t storage_read_byte(__data uint8_t addr) { return eeprom_read_byte(addr); }
+uint8_t storage_read_byte(__data uint8_t addr) { return hal_store_read(addr); }
 
 __xdata uint8_t *storage_slot_text(__data uint8_t slot) {
   return blob + slotOffset[slot];
@@ -186,9 +185,9 @@ uint8_t storage_commit(__data uint16_t totalLen, __data uint16_t crc) {
   }
   // Program only the bytes that differ, to spare DataFlash write cycles
   for (__data uint8_t i = 0; i < BLOB_CAPACITY; i++) {
-    if (eeprom_read_byte(i) != stage[i]) {
-      eeprom_write_byte(i, stage[i]);
-      if (eeprom_read_byte(i) != stage[i]) {
+    if (hal_store_read(i) != stage[i]) {
+      hal_store_write(i, stage[i]);
+      if (hal_store_read(i) != stage[i]) {
         storage_init(); // keep using whatever is really stored
         return ST_FLASH_ERR;
       }

@@ -1,6 +1,5 @@
 // clang-format off
-#include <Arduino.h>
-#include "config.h"
+#include "hal/hal.h"
 #include "lock.h"
 #include "storage.h"
 // clang-format on
@@ -22,7 +21,7 @@ static __data uint8_t idleMinutes;
 void lock_activity(void) {
   idleSeconds = 0;
   idleMinutes = 0;
-  idleTickAt = (uint16_t)millis();
+  idleTickAt = hal_ms();
 }
 
 void lock_init(void) {
@@ -74,7 +73,7 @@ uint8_t lock_start_entry(void) {
     return 0;
   }
   enteredLen = 0;
-  lastInputAt = (uint16_t)millis();
+  lastInputAt = hal_ms();
   return 1;
 }
 
@@ -89,7 +88,7 @@ static void lockNow(void) {
 }
 
 void lock_task(void) {
-  __data uint16_t now = (uint16_t)millis();
+  __data uint16_t now = hal_ms();
   __data uint16_t idle = now - lastInputAt;
   __data uint8_t minutes = storage_autolock_minutes();
 
@@ -127,7 +126,7 @@ void lock_input(__data uint8_t slot) {
   if (!lock_entering()) {
     return;
   }
-  lastInputAt = (uint16_t)millis();
+  lastInputAt = hal_ms();
   entered[enteredLen++] = slot;
   if (enteredLen < len) {
     return;

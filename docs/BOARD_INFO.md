@@ -214,18 +214,18 @@ CH55x 부트로더는 업로드할 때 함께 쓰는 **진입 설정**(vnproch55
 
 - **설정 저장 위치**: CH55x와 같게 **DataFlash 맨 앞에 같은 블롭**(`MK` 헤더, CRC, 슬롯 길이 + 문자열)을 둡니다. 키별 문자열은 **코드 플래시에 쓰지 않습니다**. 용량은 HELLO 바이트 7~8로 알리므로 GUI는 그대로 동작합니다.
 - **개발 도구**: WCH 공식 **EVT SDK**(CH573/CH583 예제, USB 장치 예제 포함)의 헤더·드라이버 + **RISC-V GCC**(`riscv-none-elf-gcc`) + Makefile. 지금의 arduino-cli처럼 명령줄로 빌드되게 `tools/build_fw.ps1 -Board`에 연결합니다. 디버깅이 필요하면 MounRiver Studio와 WCH-LinkE를 씁니다. CH57x용 Arduino 코어는 충분히 성숙한 것이 없어서 쓰지 않습니다.
-- **소스 구조**: 하드웨어에 매이지 않는 부분(`macro.c`, `lock.c`, `protocol.c`, `storage.c`의 블롭 해석)은 한 벌로 두고, 칩마다 다른 부분은 HAL로 나눕니다.
+- **소스 구조**: 하드웨어에 매이지 않는 부분은 한 벌로 두고, 칩마다 다른 부분은 HAL로 나눕니다. → **CH55x 쪽은 나눠 둠 (2026-10-31)**: 기능 코드(`macro.c`, `lock.c`, `protocol.c`, `storage.c`, `input.c`, `led.c`)는 `src/hal/hal.h`의 이름만 쓰고, CH55x 구현은 `src/hal/ch552/`([펌웨어 README 코드 구조](../firmware/macro_keyboard/README.md#코드-구조)). CH57x는 `src/hal/ch57x/`에 같은 이름을 구현하면 됩니다.
 
   | HAL | CH55x | CH57x |
   |---|---|---|
   | 핀 읽기, 키 스캔 | 포트 직접 읽기 (P1/P3) | GPIO 레지스터 (PA/PB) |
   | 시간 (`millis`) | Timer0 | SysTick 또는 TMR |
-  | USB 엔드포인트 (키보드, Vendor HID) | CH55xDuino 기반 `src/usb` | EVT의 USB 장치 드라이버 |
+  | USB 엔드포인트 (키보드, Vendor HID) | CH55xDuino 기반 `src/hal/ch552/usb` | EVT의 USB 장치 드라이버 |
   | DataFlash 읽기/지우기/쓰기 | 바이트 단위 쓰기 | 블록 지우기 + 쓰기 |
   | LED | `neopixel_show_P3_4` | 보드에 따라 |
   | 부트로더로 넘어가기 | `lcall 0x3800` | 칩별 방법 확인 필요 |
 
-  8051 전용 메모리 지정자(`__data`, `__idata`, `__xdata`, `__code`)는 매크로로 감싸 GCC에서는 빈 값이 되게 합니다(host_test가 이미 gcc로 공용 코드를 빌드하므로 출발점이 있습니다).
+  8051 전용 메모리 지정자(`__data`, `__idata`, `__xdata`, `__code`)는 매크로로 감싸 GCC에서는 빈 값이 되게 합니다. host_test의 `stub/hal_host.h`가 이미 그렇게 해서 기능 코드를 gcc로 빌드합니다.
 - **GUI 장입**: CH57x의 ROM 부트로더도 같은 WCH ISP 계열(USB `4348:55E0`, Detect 문자열 `MCU ISP & WCH.CN`)이라 **업데이트 창의 칩 목록과 흐름은 그대로 씁니다**. 바뀌는 것은 업로드 도구뿐입니다: vnproch55x는 CH55x 전용이므로 CH57x 보드는 보드 목록에서 **wchisp**(오픈소스, CH55x/CH57x/CH58x 지원)를 고르게 합니다. 칩 표(`chips.py`)에 CH57x 칩 ID와 업로더 종류를 더합니다.
 - **확인할 것**: wchisp가 Windows에서 지금의 WCH 드라이버(CH375DLL)로 동작하는지, 아니면 WinUSB 드라이버가 필요한지 / CH57x 부트로더가 돌려주는 칩 ID와 칩 고유 ID / 앱에서 부트로더로 넘어가는 방법과 기판의 부트 핀.
 

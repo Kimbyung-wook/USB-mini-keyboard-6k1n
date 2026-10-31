@@ -1,12 +1,8 @@
 // clang-format off
-#include <Arduino.h>
-#include "config.h"
+#include "hal/hal.h"
 #include "macro.h"
 #include "storage.h"
-#include "usb/hid.h"
 // clang-format on
-
-extern __xdata uint8_t keyboardLedStatus; // bit 1: Caps Lock
 
 #define MOD_CTRL 0x01
 #define MOD_SHIFT 0x02
@@ -101,7 +97,7 @@ static __data uint8_t pos;
 static __data uint8_t needRelease;
 static __data uint8_t delaying;
 static __data uint16_t delayMs;
-static __data uint32_t delayStart;
+static __data uint16_t delayStart; // delays are at most 10 s
 static __data uint16_t sentAt;  // last kb_send()
 static __data uint8_t stalled;  // a report was withdrawn in this playback
 
@@ -170,7 +166,7 @@ static void setChar(__data uint8_t c, uint8_t combo) {
       return; // {CTRL+C} means Ctrl + the C key, without Shift
     }
     // With Caps Lock on, Shift gives lowercase: invert it for letters
-    if (((m & SHIFT_FLAG) != 0) != ((keyboardLedStatus & 0x02) != 0)) {
+    if (((m & SHIFT_FLAG) != 0) != (kb_caps_lock() != 0)) {
       tokMods = MOD_SHIFT;
     }
     return;
@@ -322,13 +318,13 @@ void macro_task(void) {
   }
 
   if (delaying) {
-    if (millis() - delayStart < delayMs) {
+    if ((uint16_t)(hal_ms() - delayStart) < delayMs) {
       return;
     }
     delaying = 0;
   }
   if (kb_busy()) {
-    if ((uint16_t)((uint16_t)millis() - sentAt) < SEND_TIMEOUT_MS) {
+    if ((uint16_t)(hal_ms() - sentAt) < SEND_TIMEOUT_MS) {
       return;
     }
     // Not collected: drop it, the rest of this text and the queue. One
@@ -342,7 +338,7 @@ void macro_task(void) {
   }
   if (needRelease) {
     kb_send(0, 0);
-    sentAt = (uint16_t)millis();
+    sentAt = hal_ms();
     needRelease = 0;
     return;
   }
@@ -354,12 +350,12 @@ void macro_task(void) {
   switch (nextToken()) {
   case TOK_KEY:
     kb_send(tokMods, tokKey);
-    sentAt = (uint16_t)millis();
+    sentAt = hal_ms();
     needRelease = 1;
     break;
   case TOK_DELAY:
     delayMs = tokDelay;
-    delayStart = millis();
+    delayStart = hal_ms();
     delaying = 1;
     break;
   default:

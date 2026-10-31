@@ -21,19 +21,23 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1 -Board mk6k1n
+  powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1 -Board mk6k1nl
 #>
 param(
     [ValidateSet('mk6k1n', 'mk6k1nl')]
     [string]$Board = 'mk6k1n'
 )
 
-# Board options of each board file
-$fqbns = @{
-    mk6k1n  = 'CH55xDuino:mcs51:ch552:usb_settings=user266,bootloader_pin=p15'
-    mk6k1nl = 'CH55xDuino:mcs51:ch552:usb_settings=user266,bootloader_pin=p15'
+# The chip of each board file (BOARD_CHIP), and the build options of each
+# chip (the arduino-cli board and its menu settings)
+$boardChips = @{
+    mk6k1n  = 'ch552'
+    mk6k1nl = 'ch552'
 }
-$Fqbn = $fqbns[$Board]
+$chipFqbns = @{
+    ch552 = 'CH55xDuino:mcs51:ch552:usb_settings=user266,bootloader_pin=p15'
+}
+$Fqbn = $chipFqbns[$boardChips[$Board]]
 $boardName = $Board.ToUpper()
 
 $ErrorActionPreference = 'Stop'

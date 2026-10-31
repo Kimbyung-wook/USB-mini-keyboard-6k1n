@@ -1,6 +1,6 @@
 // Adapted from the CH55xduino qmkCompatibleKeyboard example (LGPL-2.1)
 #include "USBconstant.h"
-#include "../config.h"
+#include "../../../config.h"
 
 // Device descriptor
 __code USB_Descriptor_Device_t DeviceDescriptor = {

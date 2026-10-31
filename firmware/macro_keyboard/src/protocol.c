@@ -1,23 +1,15 @@
 // clang-format off
-#include <Arduino.h>
-#include "config.h"
+#include "hal/hal.h"
 #include "protocol.h"
 #include "storage.h"
 #include "lock.h"
 #include "macro.h"
-#include "usb/hid.h"
 // clang-format on
 
 #define U16(lo, hi) ((uint16_t)(lo) | ((uint16_t)(hi) << 8))
 
-// Fixed buffers: indexing them is much shorter than going through a pointer
-// clang-format off
-#include "usb/USBconstant.h"
-extern __xdata __at (EP2_ADDR) uint8_t Ep2Buffer[];
-extern __xdata __at (EP2_ADDR + 64) uint8_t Ep2InBuffer[];
-// clang-format on
-#define req Ep2Buffer
-#define res Ep2InBuffer
+#define req HAL_REQ
+#define res HAL_RES
 
 // HELLO bytes 17-31 (docs/BOARD_INFO.md 2); the chip's unique ID follows
 #define BOARD_INFO_SIZE 15
@@ -77,7 +69,7 @@ uint8_t protocol_poll(void) {
       res[17 + i] = ((__code uint8_t *)&boardInfo)[i];
     }
     for (__data uint8_t i = 0; i < 4; i++) {
-      res[32 + i] = *(__code uint8_t *)(ROM_CHIP_ID_LO + i);
+      res[32 + i] = hal_chip_uid(i);
     }
     break;
 

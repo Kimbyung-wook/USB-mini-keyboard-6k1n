@@ -4,6 +4,7 @@ Run from the repo root:  gui\\.venv\\Scripts\\python firmware\\host_test\\run.py
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,13 +28,15 @@ def keys(*pairs: tuple[int, int] | str) -> str:
     return " ".join(out)
 
 
-def build(out_dir: Path) -> Path:
-    exe = out_dir / "host_test.exe"
+def build(out_dir: Path, board: str = "MK6K1N") -> Path:
+    """The firmware's functions against the host HAL (stub/hal_host.h)."""
+    exe = out_dir / f"host_test_{board}.exe"
     subprocess.run(
-        ["gcc", "-std=c99", "-Wall", "-I", str(HERE / "stub"), "-I", str(SRC),
-         str(HERE / "host_test.c"), str(SRC / "storage.c"), str(SRC / "macro.c"),
-         str(SRC / "lock.c"),
-         "-o", str(exe)],
+        ["gcc", "-std=c99", "-Wall", "-DHAL_HOST", f"-DBOARD_{board}",
+         "-I", str(HERE / "stub"), "-I", str(SRC),
+         str(HERE / "host_test.c")] + [str(SRC / f) for f in
+                                       ("storage.c", "macro.c", "lock.c", "input.c", "led.c")]
+        + ["-o", str(exe)],
         check=True)
     return exe
 
@@ -242,6 +245,42 @@ def main() -> int:
         got = slot_lines(run(exe, out, hi, extra=["reset", "3"]))
         check("bus reset: the rest is dropped", got[0], keys((SHIFT, 0x0b), (0, 0x0c)))
         check("bus reset: types again", got[1], hi_keys)
+
+        # Keys, knob and LEDs (src/input.c, src/led.c) through the host HAL,
+        # on both boards. Slots type a..i: key C = 06, CW = 0a, CCW = 0b.
+        letters = p.encode_blob(list("abcdefghi"))
+        locked = p.encode_blob(list("abcdefghi"), [3, 6])     # D, then knob CW
+        for board, exe_b in (("MK6K1N", exe), ("MK6K1NL", build(out, "MK6K1NL"))):
+            key_leds = board == "MK6K1NL"
+
+            def typed(blob: bytes, *steps: str) -> tuple[str, str]:
+                """(key reports, LED frames) of a run of input steps."""
+                text = " ".join(run(exe_b, out, blob, extra=["input", *steps])[3:])
+                return (" ".join(re.findall(r"\b[0-9a-f]{2}:[0-9a-f]{2}\b", text)),
+                        " ".join(re.findall(r"L\d\.[0-9a-f]{2}\.\d", text)))
+
+            reports, leds = typed(letters, "p2", "w30", "r2", "w300")
+            check(f"{board}: key C types its slot", reports, keys((0, 0x06)))
+            check(f"{board}: key C lights green, then blue again", leds,
+                  "L1.00.0 L1.04.2 L1.00.0" if key_leds else "L1.00.0 L2.00.0 L1.00.0")
+            reports, leds = typed(letters, "e10", "e00", "e01", "e11", "w300")
+            check(f"{board}: a clockwise detent types slot 6", reports, keys((0, 0x0a)))
+            check(f"{board}: a knob action lights every key LED", leds,
+                  "L1.00.0 L1.3f.2 L1.00.0" if key_leds else "L1.00.0 L2.00.0 L1.00.0")
+            check(f"{board}: a counter-clockwise detent types slot 7",
+                  typed(letters, "e01", "e00", "e10", "e11", "w300")[0], keys((0, 0x0b)))
+            check(f"{board}: a detent with a missed sample still counts",
+                  typed(letters, "e10", "e00", "e11", "w300")[0], keys((0, 0x0a)))
+            check(f"{board}: knob off a detent (10) chattering to 11 types nothing",
+                  typed(letters, "s10", "e11", "e10", "e11", "e10", "e11", "w300")[0], "")
+            check(f"{board}: a 10 ms bounce is not a key press",
+                  typed(letters, "p1", "w10", "r1", "w300")[0], "")
+            reports, leds = typed(locked, "p6", "w2100", "r6", "w50", "p3", "w30", "r3", "w300",
+                                  "e10", "e00", "e01", "e11", "w300")
+            check(f"{board}: pattern entry types nothing and opens", reports, "")
+            check(f"{board}: pattern entry LEDs (locked, red, pressed key dark, open)", leds,
+                  "L5.00.0 L0.00.0 L5.00.0 L5.08.0 L5.00.0 L1.00.0" if key_leds
+                  else "L5.00.0 L0.00.0 L5.00.0 L1.00.0")
 
     print("all passed" if failures == 0 else f"{failures} failed")
     return 1 if failures else 0

@@ -11,7 +11,7 @@
 #include <Arduino.h>
 // clang-format on
 
-void USBInterrupt(void); // src/usb/USBhandler.c
+void USBInterrupt(void); // usb/USBhandler.c
 
 void DeviceUSBInterrupt(void) __interrupt(INT_NO_USB) { USBInterrupt(); }
 

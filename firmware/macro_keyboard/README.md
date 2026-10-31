@@ -75,7 +75,7 @@ powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 - **빌드 날짜**는 `tools/build_fw.ps1`이 빌드 순간의 시각을 컴파일 옵션(`-DFW_BUILD_YEAR=2026` 등)으로 넘깁니다. 컴파일러의 `__DATE__`를 쓰지 않는 이유: Arduino는 바뀌지 않은 파일을 다시 컴파일하지 않아서 예전 날짜가 남습니다.
 - GUI 연결 막대에 `펌웨어 v1.1.0 (빌드 2026-10-26 11:40)`처럼 표시됩니다. 펌웨어 1.0은 `펌웨어 v1.0`으로만 보입니다.
 
-확인 결과(2026-10-31, v1.6.0): MK6K1N 8610바이트(60%), 전역 변수 359바이트, 스택 122바이트. MK6K1NL 8795바이트(61%), 전역 변수 353바이트, 스택 116바이트(키별 LED 표시). v1.5.0은 MK6K1N 8608, MK6K1NL 8895바이트였습니다. v1.4.1(8594바이트)에서 노브 판정이 바뀌었습니다(+14바이트, 한 칸 안에서 2단계 이상 같은 방향이어야 회전). v1.4.0(8446바이트)에 USB 전송 멈춤 처리가 더해졌습니다(+148바이트). v1.3.x(8268바이트)에서 v1.4.0으로는 자동 잠금이 더해졌습니다(+178바이트). v1.2.1(8151바이트)에서 v1.3.0으로는 HELLO 보드 정보와 펌웨어 식별 문자열이 더해졌습니다(+117바이트). v1.2.0(11587바이트, 80%)에서 v1.2.1로는 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
+확인 결과(2026-10-31, v1.6.0, HAL 분리 후): MK6K1N 8694바이트(60%), 전역 변수 360바이트, 스택 126바이트. MK6K1NL 8915바이트(62%), 전역 변수 358바이트, 스택 120바이트(키별 LED 표시). 기능 코드와 하드웨어를 나누면서(아래 [코드 구조](#코드-구조)) 모듈 사이 호출이 늘어 84~120바이트 커졌습니다(나누기 전 8610 / 8795바이트). v1.5.0은 MK6K1N 8608, MK6K1NL 8895바이트였습니다. v1.4.1(8594바이트)에서 노브 판정이 바뀌었습니다(+14바이트, 한 칸 안에서 2단계 이상 같은 방향이어야 회전). v1.4.0(8446바이트)에 USB 전송 멈춤 처리가 더해졌습니다(+148바이트). v1.3.x(8268바이트)에서 v1.4.0으로는 자동 잠금이 더해졌습니다(+178바이트). v1.2.1(8151바이트)에서 v1.3.0으로는 HELLO 보드 정보와 펌웨어 식별 문자열이 더해졌습니다(+117바이트). v1.2.0(11587바이트, 80%)에서 v1.2.1로는 기능은 그대로 두고 크기만 줄였습니다([docs/FIRMWARE_SIZE.md](../../docs/FIRMWARE_SIZE.md)).
 
 ### 보드 파일
 
@@ -86,7 +86,8 @@ powershell -ExecutionPolicy Bypass -File tools\build_fw.ps1
 | `mk6k1n.h` | MK6K1N: 6키 + 노브 | 눈에 보이는 LED 1개(체인 위치를 몰라 8자리에 같은 색) | [test_pinmap](../test_pinmap/README.md) |
 | `mk6k1nl.h` | MK6K1NL: 6키 + 노브, 핀은 MK6K1N과 같음 | **키마다 1개**(체인 0~5 = 키 A~F). 누른 키만 초록, 나머지는 파랑. 패턴 입력 중(전체 빨강)에는 누른 키만 잠깐 꺼짐 | [test_mk6k1nl](../test_mk6k1nl/README.md) |
 
-- `mk6k1nl.h`는 이름과 LED만 정하고 핀 배치는 `mk6k1n.h`를 그대로 씁니다. LED 표시는 `BOARD_KEY_LEDS`(1 = LED i가 키 i 아래)로 나뉩니다.
+- 두 보드는 같은 기판이라 칩·키/노브 수·핀은 `ch552_6k1n.h` 한 곳에 있고, `mk6k1n.h`와 `mk6k1nl.h`는 각자 이름(`BOARD_NAME`)과 LED(`BOARD_LED_COUNT`, `BOARD_KEY_LEDS`: 1 = LED i가 키 i 아래)를 정한 뒤 그것을 include합니다. 핀 그림은 [docs/PINMAP.md](../../docs/PINMAP.md).
+- 새 보드: 기판(핀)이 같으면 이름과 LED만 정한 보드 파일 하나, 기판이 다르면 `<칩>_<배치>.h` 같은 공통 파일도 새로 만들고 `src/config.h`의 고르기 목록과 `tools/build_fw.ps1`의 `$boardChips`에 더합니다.
 - `tools/build_fw.ps1 -Board mk6k1n`이 `-DBOARD_MK6K1N`으로 보드를 고르고, 결과를 `build/macro_keyboard-MK6K1N.hex`로도 복사합니다(GUI의 펌웨어 업데이트 창이 먼저 고르는 파일). `-Board mk6k1nl`이면 `build/macro_keyboard-MK6K1NL.hex`입니다. `-Board`를 빼면 `mk6k1n`입니다. Arduino IDE에서 빌드해도 `mk6k1n`이 됩니다.
 - 펌웨어는 HELLO 바이트 17~35로 보드 정보를 보내고([docs/PROTOCOL.md](../../docs/PROTOCOL.md)), hex 안에 식별 문자열 `MKFW1:<보드>:<칩>:<버전>`(예: `MKFW1:MK6K1N:CH552:1.3.0`)을 넣습니다. GUI는 올리기 전에 이 문자열로 보드와 칩을 확인합니다.
 - 보드 이름은 GUI의 보드 목록 `gui/boards.py`와 같아야 합니다.
@@ -173,21 +174,56 @@ GUI 아래쪽 막대에 `N자 입력 · M자 더 입력 가능 (사용 / 128 바
 
 더 자세한 내용은 [docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md)를 보세요.
 
-## 코드 구성
+## 코드 구조
+
+기능 코드와 하드웨어를 나눴습니다(2026-10-31). 기능 코드(`src/*.c`)는 하드웨어를 **`src/hal/hal.h`의 이름으로만** 씁니다(시간, 스위치, 노브 선, LED, 설정 저장, HID 키보드, 설정 통신, 부트로더). 칩마다 구현이 `src/hal/<칩>/`에 있고, 보드 파일이 고릅니다. CH55x에서는 대부분 매크로라 거의 그대로의 코드가 됩니다.
+
+```mermaid
+flowchart TB
+    ino["macro_keyboard.ino<br/>setup / loop: 모듈을 이어 붙이기만 함"]
+    subgraph APP["기능 (src/*.c, 칩과 상관없음)"]
+        direction LR
+        input["input.c<br/>키·노브 판정"]
+        led["led.c<br/>LED 표시"]
+        lock["lock.c<br/>잠금"]
+        macro["macro.c<br/>문자열 입력"]
+        protocol["protocol.c<br/>설정 통신"]
+        storage["storage.c<br/>설정 블롭"]
+    end
+    hal["src/hal/hal.h<br/>추상 하드웨어"]
+    subgraph CH55X["src/hal/ch552 (CH55xDuino)"]
+        direction LR
+        halc["hal_ch552.c/.h<br/>핀, LED, 부트로더"]
+        usb["usb/<br/>HID 키보드, Vendor HID"]
+        main["main_min.c"]
+    end
+    host["host_test/stub/hal_host.h<br/>PC 검사용"]
+    boards["src/boards/*.h<br/>보드 파일 (핀, LED)"]
+    ino --> APP
+    APP --> hal
+    hal --> CH55X
+    hal -.-> host
+    boards --> CH55X
+```
 
 | 파일 | 내용 |
 |---|---|
-| `macro_keyboard.ino` | 키/노브 입력, LED, 부트로더 점프, 메인 루프 |
+| `macro_keyboard.ino` | `setup()`과 `loop()`: 모듈을 순서대로 부르기만 함 |
 | `src/config.h` | 버전, 보드 파일 고르기, 슬롯 번호, 용량, 잠금 설정값 |
-| `src/boards/mk6k1n.h` | MK6K1N의 보드 정보(칩, 키/노브 수, 이름, LED)와 핀 배치 |
-| `src/boards/mk6k1nl.h` | MK6K1NL의 이름과 LED(키마다 1개). 핀 배치는 `mk6k1n.h` |
+| `src/boards/ch552_6k1n.h` | 6키 + 노브 CH552G 기판: 칩, 키/노브 수, 핀 배치 (MK6K1N, MK6K1NL 공통) |
+| `src/boards/mk6k1n.h`, `mk6k1nl.h` | 보드 이름과 LED (LED 1개 / 키마다 1개) |
+| `src/input.c/.h` | 스위치 디바운스, 노브 판정(한 칸 중 2단계 이상), 노브 길게 누르기, 입력을 잠금/문자열 입력으로 보내기 |
+| `src/led.c/.h` | LED 표시 정책(색, 깜빡임, 키별 초록/꺼짐)과 색 표 `hal_palette` |
 | `src/lock.c/.h` | 잠금 상태, 패턴 입력 판정, 틀린 횟수, 자동 잠금 시간 |
 | `src/protocol.c/.h` | Vendor HID 명령 처리 (HELLO/READ/WRITE/COMMIT/TEST/BOOT), HELLO 보드 정보, 펌웨어 식별 문자열 |
-| `src/storage.c/.h` | DataFlash 블롭 저장, CRC 검사, 슬롯 찾기 (문자열, 패턴 암호, 설정 슬롯) |
+| `src/storage.c/.h` | 설정 블롭 저장, CRC 검사, 슬롯 찾기 (문자열, 패턴 암호, 설정 슬롯) |
 | `src/macro.c/.h` | 매크로 해석과 비동기 출력 (키 누름/뗌, DELAY) |
-| `src/usb/` | USB 디스크립터, 요청 처리, 엔드포인트 (CH55xDuino qmkCompatibleKeyboard 예제 기반, LGPL-2.1) |
+| `src/hal/hal.h` | **추상 하드웨어**: 기능 코드가 쓰는 이름 목록과 설명, 칩 구현 고르기 |
+| `src/hal/ch552/hal_ch552.c/.h` | CH55x 구현: 핀 설정, 스위치·노브 읽기, WS2812 LED, DataFlash, 부트로더 |
+| `src/hal/ch552/usb/` | USB 디스크립터, 요청 처리, 엔드포인트 (CH55xDuino qmkCompatibleKeyboard 예제 기반, LGPL-2.1) |
+| `src/hal/ch552/main_min.c` | 코어의 `main.c` 대신 쓰는 작은 `main()`과 인터럽트 표 |
 
-`firmware/host_test/run.py`로 `storage.c`, `macro.c`, `lock.c`를 PC(gcc)에서 검사할 수 있습니다. GUI의 인코더로 만든 블롭을 저장하고, 각 슬롯이 보내는 HID 키 코드와 패턴 암호 판정을 확인합니다.
+`firmware/host_test/run.py`로 기능 코드(`storage.c`, `macro.c`, `lock.c`, `input.c`, `led.c`)를 PC(gcc)에서 검사할 수 있습니다. 하드웨어 대신 `host_test/stub/hal_host.h`를 씁니다. GUI의 인코더로 만든 블롭을 저장하고, 각 슬롯이 보내는 HID 키 코드, 패턴 암호 판정, 그리고 가짜 스위치·노브 선을 넣었을 때의 입력과 LED 표시(두 보드 모두)를 확인합니다.
 
 ```powershell
 gui\.venv\Scripts\python firmware\host_test\run.py

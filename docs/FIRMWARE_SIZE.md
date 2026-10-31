@@ -2,6 +2,8 @@
 
 CH552G 매크로 키보드 펌웨어(`firmware/macro_keyboard`)의 플래시 사용량을 줄이는 방법을 정리한 문서입니다. 이 문서는 **제안만** 담고 있으며, 저장소의 코드는 바꾸지 않았습니다.
 
+> 2026-10-31에 하드웨어 코드를 `src/hal/ch552/`로 옮겼습니다. 이 문서의 `src/usb/…`는 지금 `src/hal/ch552/usb/…`, `src/main_min.c`는 `src/hal/ch552/main_min.c`이고, `macro_keyboard.ino`의 키·노브·LED 코드는 `src/input.c`, `src/led.c`, `src/hal/ch552/hal_ch552.c`로 나뉘었습니다. 줄 번호는 그 전 기준입니다.
+
 ## 요약
 
 - 현재 크기: **11,585바이트 / 14,336바이트 (81%)**, RAM(xdata) 498바이트. 실제 빌드로 측정한 값입니다. README의 11,587바이트와 2바이트 차이는 빌드 날짜 숫자 때문입니다.
